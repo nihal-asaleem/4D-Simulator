@@ -1,778 +1,183 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>4D Construction Sequence Simulator</title>
-  <!--
-    Official IIFE. The old unpkg URL (@trimble/workspace-api) 404s, which left
-    viewer === null and made Load Data show "Viewer is not connected yet."
-  -->
-  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
-  <style>
-    :root {
-      --bg: #0f1720;
-      --panel: #17202b;
-      --panel-2: #1d2836;
-      --border: #2b3b4d;
-      --text: #e8eef5;
-      --muted: #93a4b8;
-      --accent: #1a8cff;
-      --accent-2: #0ea5e9;
-      --good: #22c55e;
-      --warn: #f59e0b;
-      --danger: #ef4444;
-      --shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-      --radius: 12px;
-    }
-
-    * { box-sizing: border-box; }
-
-    html, body {
-      margin: 0;
-      height: 100%;
-      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-      background: radial-gradient(1200px 600px at 0% 0%, #1b2d44 0%, var(--bg) 55%);
-      color: var(--text);
-    }
-
-    .app {
-      min-height: 100%;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    header {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 18px;
-      letter-spacing: 0.02em;
-    }
-
-    .subtitle {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .card {
-      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px;
-      box-shadow: var(--shadow);
-    }
-
-    label {
-      display: block;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 6px;
-      font-weight: 600;
-    }
-
-    input[type="text"] {
-      width: 100%;
-      border: 1px solid var(--border);
-      background: #0d141c;
-      color: var(--text);
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 14px;
-      outline: none;
-    }
-
-    input[type="text"]:focus,
-    input[type="range"]:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(26, 140, 255, 0.2);
-    }
-
-    .row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    button {
-      border: 0;
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-weight: 650;
-      cursor: pointer;
-      color: #fff;
-      background: #334155;
-      transition: transform 0.08s ease, filter 0.15s ease, opacity 0.15s ease;
-    }
-
-    button:hover { filter: brightness(1.08); }
-    button:active { transform: translateY(1px); }
-    button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      transform: none;
-    }
-
-    .btn-primary { background: linear-gradient(180deg, var(--accent) 0%, #1066c7 100%); flex: 1; }
-    .btn-play { background: linear-gradient(180deg, #16a34a 0%, #15803d 100%); flex: 1; }
-    .btn-pause { background: linear-gradient(180deg, #d97706 0%, #b45309 100%); flex: 1; }
-    .btn-reset { background: linear-gradient(180deg, #64748b 0%, #475569 100%); flex: 1; }
-
-    .phase-box {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .phase-value {
-      font-size: 28px;
-      font-weight: 750;
-      color: #7dd3fc;
-    }
-
-    .meta {
-      margin-top: 10px;
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.45;
-    }
-
-    .status {
-      font-size: 12px;
-      color: var(--muted);
-      min-height: 18px;
-    }
-
-    .status.error { color: #fca5a5; }
-    .status.ok { color: #86efac; }
-
-    input[type="range"] {
-      width: 100%;
-      accent-color: var(--accent-2);
-    }
-
-    .speed-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 4px;
-    }
-
-    .progress {
-      height: 6px;
-      background: #0d141c;
-      border-radius: 999px;
-      overflow: hidden;
-      margin-top: 12px;
-    }
-
-    .progress > span {
-      display: block;
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, var(--accent-2), #22c55e);
-      transition: width 0.2s ease;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4D Sequence Simulator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 16px;
+            color: #333;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin-top: 0;
+            font-size: 18px;
+            color: #005f9e; /* Trimble Blue */
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background-color: #005f9e;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #004b7d;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .slider-container {
+            margin-top: 15px;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        #status {
+            margin-top: 10px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #555;
+        }
+    </style>
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>4D Sequence Simulator</h1>
-      <div class="subtitle">Trimble Connect 3D Viewer side-panel extension</div>
-    </header>
 
-    <section class="card">
-      <label for="parameterName">Parameter Name</label>
-      <input id="parameterName" type="text" value="ORDER" autocomplete="off" />
-      <div class="row" style="margin-top: 10px;">
-        <button id="loadBtn" class="btn-primary" type="button">Load Data</button>
-      </div>
-      <div id="loadMeta" class="meta">Connect to the viewer, then load objects grouped by the parameter above.</div>
-    </section>
-
-    <section class="card">
-      <div class="phase-box">
-        <div>
-          <label>Current Phase</label>
-          <div class="phase-value" id="currentPhase">—</div>
+    <div class="container">
+        <h2>4D Sequence Simulator</h2>
+        
+        <div class="controls">
+            <button id="btn-play" onclick="playSequence()">Play</button>
+            <button id="btn-pause" onclick="pauseSequence()" disabled>Pause</button>
+            <button id="btn-reset" onclick="resetSequence()">Reset</button>
         </div>
-        <div class="status" id="playbackStatus">Idle</div>
-      </div>
-      <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
-    </section>
 
-    <section class="card">
-      <label>Playback</label>
-      <div class="row">
-        <button id="playBtn" class="btn-play" type="button" disabled>Play</button>
-        <button id="pauseBtn" class="btn-pause" type="button" disabled>Pause</button>
-        <button id="resetBtn" class="btn-reset" type="button" disabled>Reset</button>
-      </div>
-    </section>
+        <div class="slider-container">
+            <label for="step-slider">Construction Progress:</label>
+            <input type="range" id="step-slider" min="0" max="100" value="0" onchange="jumpToStep(this.value)">
+        </div>
 
-    <section class="card">
-      <label for="speedSlider">Playback Speed</label>
-      <input id="speedSlider" type="range" min="0.5" max="3" step="0.1" value="1" />
-      <div class="speed-row">
-        <span>0.5 s / step</span>
-        <span id="speedLabel">1.0 s / step</span>
-        <span>3.0 s / step</span>
-      </div>
-    </section>
+        <div id="status">Status: Ready. Waiting to load model data...</div>
+    </div>
 
-    <div id="status" class="status">Initializing Workspace API…</div>
-  </div>
+    <!-- Script to handle the 4D Logic -->
+    <script>
+        // Variables to hold our sequence state
+        let isPlaying = false;
+        let currentStep = 0;
+        let totalSteps = 0;
+        let sequenceInterval;
+        let modelObjects = []; // This will hold the objects sorted by ORDER
 
-  <script>
-    /**
-     * 4D Construction Sequence Simulator
-     * ---------------------------------
-     * Groups 3D objects by a named property (default: "ORDER"), ghosts the
-     * whole model, then restores objects phase-by-phase to simulate construction.
-     */
-
-    // ----- DOM -----
-    const parameterInput = document.getElementById("parameterName");
-    const loadBtn = document.getElementById("loadBtn");
-    const playBtn = document.getElementById("playBtn");
-    const pauseBtn = document.getElementById("pauseBtn");
-    const resetBtn = document.getElementById("resetBtn");
-    const speedSlider = document.getElementById("speedSlider");
-    const speedLabel = document.getElementById("speedLabel");
-    const currentPhaseEl = document.getElementById("currentPhase");
-    const loadMeta = document.getElementById("loadMeta");
-    const statusEl = document.getElementById("status");
-    const playbackStatus = document.getElementById("playbackStatus");
-    const progressBar = document.getElementById("progressBar");
-
-    // ----- Runtime state -----
-    let workspace = null;
-    let viewer = null;
-    /** @type {{ key: string, numeric: number, byModel: { modelId: string, objectRuntimeIds: number[] }[] }[]} */
-    let sortedPhases = [];
-    let currentIndex = 0;
-    let intervalId = null;
-    let hasGhosted = false;
-    let isPlaying = false;
-
-    const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 }; // light grey, ~20% alpha (0–255)
-    const GHOST_OPACITY = 0.2;
-    const PROPERTY_BATCH_SIZE = 200;
-
-    function setStatus(message, kind = "") {
-      statusEl.textContent = message;
-      statusEl.className = "status" + (kind ? " " + kind : "");
-    }
-
-    function setPlaybackStatus(message) {
-      playbackStatus.textContent = message;
-    }
-
-    function updateSpeedLabel() {
-      const seconds = Number(speedSlider.value);
-      speedLabel.textContent = seconds.toFixed(1) + " s / step";
-    }
-
-    function updatePhaseUi() {
-      if (!sortedPhases.length) {
-        currentPhaseEl.textContent = "—";
-        progressBar.style.width = "0%";
-        return;
-      }
-      if (currentIndex <= 0) {
-        currentPhaseEl.textContent = "—";
-        progressBar.style.width = "0%";
-        return;
-      }
-      const phase = sortedPhases[currentIndex - 1];
-      currentPhaseEl.textContent = String(phase.key);
-      progressBar.style.width = ((currentIndex / sortedPhases.length) * 100).toFixed(1) + "%";
-    }
-
-    function setControlsEnabled(loaded) {
-      playBtn.disabled = !loaded;
-      pauseBtn.disabled = !loaded || !isPlaying;
-      resetBtn.disabled = !loaded;
-    }
-
-    /**
-     * Official IIFE global is TrimbleConnectWorkspace.
-     * Also accept WorkspaceAPI / TrimbleWorkspaceAPI if a different bundle loads.
-     */
-    function resolveConnectFn() {
-      const candidates = [
-        window.TrimbleConnectWorkspace,
-        window.WorkspaceAPI,
-        window.TrimbleWorkspaceAPI,
-        window.trimbleConnectWorkspaceApi
-      ];
-      for (const api of candidates) {
-        if (api && typeof api.connect === "function") return api.connect.bind(api);
-      }
-      return null;
-    }
-
-    function loadScript(src) {
-      return new Promise((resolve, reject) => {
-        const existing = document.querySelector('script[src="' + src + '"]');
-        if (existing && resolveConnectFn()) {
-          resolve();
-          return;
-        }
-        const script = document.createElement("script");
-        script.src = src;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error("Failed to load " + src));
-        document.head.appendChild(script);
-      });
-    }
-
-    async function ensureApiScript() {
-      if (resolveConnectFn()) return;
-      const sources = [
-        "https://components.connect.trimble.com/trimble-connect-workspace-api/index.js",
-        "https://unpkg.com/trimble-connect-workspace-api/dist/iife/trimbleconnect.workspace.api.js"
-      ];
-      let lastError = null;
-      for (const src of sources) {
-        try {
-          await loadScript(src);
-          if (resolveConnectFn()) return;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-      throw lastError || new Error("Workspace API script did not expose connect().");
-    }
-
-    function onWorkspaceEvent(event, data) {
-      console.debug("[WorkspaceAPI event]", event, data);
-    }
-
-    function connectionTargets() {
-      const targets = [];
-      if (window.parent && window.parent !== window) targets.push(window.parent);
-      if (window.top && window.top !== window && window.top !== window.parent) {
-        targets.push(window.top);
-      }
-      return targets;
-    }
-
-    async function connectToViewer() {
-      await ensureApiScript();
-      const connect = resolveConnectFn();
-      if (!connect) {
-        throw new Error("Workspace API loaded, but connect() was not found.");
-      }
-
-      const targets = connectionTargets();
-      if (!targets.length) {
-        throw new Error(
-          "This page is not inside Trimble Connect. Open it from the 3D Viewer side panel, not as a GitHub Pages tab."
-        );
-      }
-
-      let lastError = null;
-      for (const target of targets) {
-        try {
-          // Official: TrimbleConnectWorkspace.connect(window.parent, onEvent, timeoutMs)
-          const api = await connect(target, onWorkspaceEvent, 30000);
-          const nextViewer = api && (api.viewer || (api.api && api.api.viewer));
-          if (!nextViewer) {
-            throw new Error("Connected, but the viewer API is missing. Open a 3D model first.");
-          }
-          workspace = api;
-          viewer = nextViewer;
-          return;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-      throw lastError || new Error("Could not connect to the 3D Viewer.");
-    }
-
-    async function initialize() {
-      try {
-        await connectToViewer();
-        setStatus("Connected to Trimble Connect 3D Viewer.", "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus("Could not connect to the viewer: " + err.message, "error");
-      }
-    }
-
-    /**
-     * PROPERTY FETCHING — ADJUST HERE IF THE API RESPONSE SHAPE DIFFERS
-     * ----------------------------------------------------------------
-     * Official ViewerAPI:
-     *   getObjects(selector?, objectState?) -> ModelObjects[]
-     *     ModelObjects = { modelId: string, objects: ObjectProperties[] }
-     *     ObjectProperties = { id: number, color?, properties?: PropertySet[] }
-     *
-     *   getObjectProperties(modelId, objectRuntimeIds) -> ObjectProperties[]
-     *
-     *   PropertySet = { name?: string, properties?: Property[] }
-     *   Property    = { name: string, type, value: string | number }
-     *
-     * getObjects() often returns IDs only (no nested properties). This loader
-     * therefore:
-     *   1) lists objects per model via getObjects()
-     *   2) hydrates properties via getObjectProperties() in batches
-     *
-     * Trimble uses *original model property names*, which may differ from the
-     * formatted names shown in the Connect UI (e.g. "ORDER" vs
-     * "IfcBuildingElement.ORDER"). The matcher below is case-insensitive and
-     * also accepts names that end with ".ORDER".
-     *
-     * If your tenant returns a flatter structure, tweak extractParameterValue().
-     */
-    function extractParameterValue(objectProperties, parameterName) {
-      const wanted = parameterName.trim().toLowerCase();
-      if (!wanted) return null;
-
-      const propsRoot = objectProperties && objectProperties.properties;
-      if (!propsRoot) return null;
-
-      // Some SDK versions return PropertySet[]; others may return a flat map.
-      if (!Array.isArray(propsRoot) && typeof propsRoot === "object") {
-        for (const [key, value] of Object.entries(propsRoot)) {
-          if (propertyNameMatches(key, wanted)) {
-            return normalizeValue(value);
-          }
-        }
-        return null;
-      }
-
-      for (const set of propsRoot) {
-        if (set && propertyNameMatches(set.name, wanted) && set.value != null) {
-          return normalizeValue(set.value);
-        }
-        const inner = (set && set.properties) || [];
-        for (const prop of inner) {
-          if (!prop) continue;
-          if (propertyNameMatches(prop.name, wanted)) {
-            return normalizeValue(prop.value);
-          }
-        }
-      }
-      return null;
-    }
-
-    function propertyNameMatches(actualName, wantedLower) {
-      if (!actualName) return false;
-      const actual = String(actualName).toLowerCase();
-      return actual === wantedLower || actual.endsWith("." + wantedLower);
-    }
-
-    function normalizeValue(value) {
-      if (value == null) return null;
-      if (typeof value === "object") {
-        if ("value" in value) return String(value.value);
-        return JSON.stringify(value);
-      }
-      return String(value);
-    }
-
-    function toNumericSortKey(raw) {
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
-    }
-
-    async function getAllModelObjects() {
-      // Empty selector => all loaded objects.
-      if (typeof viewer.getObjects === "function") {
-        const models = await viewer.getObjects();
-        if (Array.isArray(models)) return models;
-      }
-      throw new Error("viewer.getObjects() is not available on this API build.");
-    }
-
-    async function getPropertiesForIds(modelId, objectRuntimeIds) {
-      const getter =
-        (typeof viewer.getObjectProperties === "function" && viewer.getObjectProperties.bind(viewer)) ||
-        (typeof viewer.getProperties === "function" && viewer.getProperties.bind(viewer));
-
-      if (!getter) {
-        throw new Error(
-          "Neither viewer.getObjectProperties nor viewer.getProperties exists. " +
-          "Inspect workspace.viewer and update this function."
-        );
-      }
-
-      const results = [];
-      for (let i = 0; i < objectRuntimeIds.length; i += PROPERTY_BATCH_SIZE) {
-        const batch = objectRuntimeIds.slice(i, i + PROPERTY_BATCH_SIZE);
-        const props = await getter(modelId, batch);
-        if (Array.isArray(props)) results.push(...props);
-      }
-      return results;
-    }
-
-    function collectRuntimeIds(modelEntry) {
-      const objects = modelEntry.objects || modelEntry.objectRuntimeIds || [];
-      if (Array.isArray(objects) && typeof objects[0] === "number") {
-        return objects;
-      }
-      return objects
-        .map((obj) => (obj && (obj.id ?? obj.runtimeId ?? obj.objectRuntimeId)))
-        .filter((id) => typeof id === "number");
-    }
-
-    async function loadData() {
-      if (!viewer) {
-        setStatus("Connecting to the 3D Viewer…");
-        try {
-          await connectToViewer();
-          setStatus("Connected to Trimble Connect 3D Viewer.", "ok");
-        } catch (err) {
-          console.error(err);
-          setStatus("Viewer is not connected yet. " + err.message, "error");
-          return;
-        }
-      }
-
-      const parameterName = parameterInput.value.trim();
-      if (!parameterName) {
-        setStatus("Enter a parameter name first.", "error");
-        return;
-      }
-
-      stopInterval();
-      hasGhosted = false;
-      currentIndex = 0;
-      sortedPhases = [];
-      updatePhaseUi();
-      setControlsEnabled(false);
-      loadBtn.disabled = true;
-      setStatus("Loading objects and properties…");
-
-      try {
-        const models = await getAllModelObjects();
-        if (!models.length) {
-          throw new Error("No objects were returned. Load a 3D model in the viewer first.");
+        // 1. MOCK DATA (In production, you fetch this via the Trimble Workspace API)
+        // We simulate objects arriving from the viewer with an "ORDER" property.
+        function initializeModelData() {
+            document.getElementById('status').innerText = "Loading model properties...";
+            
+            // Simulating API fetch of objects
+            setTimeout(() => {
+                modelObjects = [
+                    { id: "obj_1", name: "Foundation", ORDER: 1 },
+                    { id: "obj_2", name: "Steel Framing", ORDER: 2 },
+                    { id: "obj_3", name: "First Floor Slab", ORDER: 3 },
+                    { id: "obj_4", name: "Exterior Walls", ORDER: 4 },
+                    { id: "obj_5", name: "Roof", ORDER: 5 }
+                ];
+                
+                // Sort objects strictly by the ORDER property
+                modelObjects.sort((a, b) => a.ORDER - b.ORDER);
+                totalSteps = modelObjects.length;
+                
+                // Update UI slider to match the number of steps
+                const slider = document.getElementById('step-slider');
+                slider.max = totalSteps;
+                
+                document.getElementById('status').innerText = `Status: Loaded ${totalSteps} construction steps.`;
+                resetSequence();
+            }, 1000);
         }
 
-        /** @type {Map<string, Map<string, number[]>>} phaseKey -> modelId -> ids */
-        const grouped = new Map();
-        let scanned = 0;
-        let matched = 0;
-
-        for (const model of models) {
-          const modelId = model.modelId || model.id;
-          if (!modelId) continue;
-
-          const runtimeIds = collectRuntimeIds(model);
-          scanned += runtimeIds.length;
-          if (!runtimeIds.length) continue;
-
-          const propList = await getPropertiesForIds(modelId, runtimeIds);
-          const byId = new Map();
-          for (const item of propList) {
-            const id = item.id ?? item.runtimeId;
-            if (typeof id === "number") byId.set(id, item);
-          }
-
-          for (const runtimeId of runtimeIds) {
-            const props = byId.get(runtimeId) || {};
-            const value = extractParameterValue(props, parameterName);
-            if (value == null || value === "") continue;
-            matched += 1;
-
-            if (!grouped.has(value)) grouped.set(value, new Map());
-            const perModel = grouped.get(value);
-            if (!perModel.has(modelId)) perModel.set(modelId, []);
-            perModel.get(modelId).push(runtimeId);
-          }
+        // 2. SEQUENCE CONTROLS
+        function playSequence() {
+            if (currentStep >= totalSteps) {
+                resetSequence(); // Loop back if at the end
+            }
+            
+            isPlaying = true;
+            document.getElementById('btn-play').disabled = true;
+            document.getElementById('btn-pause').disabled = false;
+            
+            // Step forward every 1.5 seconds
+            sequenceInterval = setInterval(() => {
+                if (currentStep < totalSteps) {
+                    currentStep++;
+                    updateViewerForStep(currentStep);
+                } else {
+                    pauseSequence(); // Auto-stop at the end
+                }
+            }, 1500);
         }
 
-        sortedPhases = Array.from(grouped.entries())
-          .map(([key, perModel]) => ({
-            key,
-            numeric: toNumericSortKey(key),
-            byModel: Array.from(perModel.entries()).map(([modelId, objectRuntimeIds]) => ({
-              modelId,
-              objectRuntimeIds
-            }))
-          }))
-          .sort((a, b) => {
-            if (a.numeric !== b.numeric) return a.numeric - b.numeric;
-            return String(a.key).localeCompare(String(b.key), undefined, { numeric: true });
-          });
-
-        loadMeta.textContent =
-          "Scanned " + scanned + " objects · matched " + matched +
-          " with \"" + parameterName + "\" · " + sortedPhases.length + " phases.";
-
-        if (!sortedPhases.length) {
-          setStatus(
-            "No objects had that parameter. Try the original model property name " +
-            "(Connect UI names are often reformatted).",
-            "error"
-          );
-          setControlsEnabled(false);
-          return;
+        function pauseSequence() {
+            isPlaying = false;
+            clearInterval(sequenceInterval);
+            document.getElementById('btn-play').disabled = false;
+            document.getElementById('btn-pause').disabled = true;
+            document.getElementById('status').innerText = `Status: Paused at Step ${currentStep} (${modelObjects[currentStep-1]?.name})`;
         }
 
-        currentIndex = 0;
-        updatePhaseUi();
-        setControlsEnabled(true);
-        setPlaybackStatus("Ready");
-        setStatus("Data loaded. Press Play to start the sequence.", "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus("Load failed: " + err.message, "error");
-      } finally {
-        loadBtn.disabled = false;
-      }
-    }
-
-    /**
-     * COLOR / OPACITY
-     * ---------------
-     * viewer.setObjectState(selector | undefined, objectState)
-     *   undefined selector => ALL objects in loaded models
-     * ObjectState: { color?: string | ColorRGBA | "reset", opacity?: number, visible?: boolean | "reset" }
-     * ColorRGBA channels are 0–255, including alpha.
-     */
-    async function applyState(selector, objectState) {
-      await viewer.setObjectState(selector, objectState);
-    }
-
-    async function ghostEntireModel() {
-      await applyState(undefined, {
-        color: GHOST_COLOR,
-        opacity: GHOST_OPACITY
-      });
-      hasGhosted = true;
-    }
-
-    async function restorePhase(phase) {
-      for (const group of phase.byModel) {
-        await applyState(
-          { modelObjectIds: [{ modelId: group.modelId, objectRuntimeIds: group.objectRuntimeIds }] },
-          { color: "reset", opacity: 1 }
-        );
-      }
-    }
-
-    async function restoreAllObjects() {
-      await applyState(undefined, { color: "reset", opacity: 1, visible: "reset" });
-      hasGhosted = false;
-    }
-
-    function stopInterval() {
-      if (intervalId != null) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-      isPlaying = false;
-      pauseBtn.disabled = true;
-    }
-
-    async function stepOnce() {
-      if (currentIndex >= sortedPhases.length) {
-        stopInterval();
-        setPlaybackStatus("Complete");
-        setStatus("Sequence finished. Reset to play again.", "ok");
-        return;
-      }
-
-      const phase = sortedPhases[currentIndex];
-      try {
-        await restorePhase(phase);
-        currentIndex += 1;
-        updatePhaseUi();
-        setPlaybackStatus("Playing");
-      } catch (err) {
-        console.error(err);
-        stopInterval();
-        setStatus("Playback failed: " + err.message, "error");
-      }
-    }
-
-    async function play() {
-      if (!sortedPhases.length) return;
-      if (isPlaying) return;
-
-      playBtn.disabled = true;
-      try {
-        if (currentIndex >= sortedPhases.length) {
-          await restoreAllObjects();
-          currentIndex = 0;
-          updatePhaseUi();
+        function resetSequence() {
+            pauseSequence();
+            currentStep = 0;
+            updateViewerForStep(0);
         }
 
-        if (!hasGhosted) {
-          setStatus("Ghosting the model…");
-          await ghostEntireModel();
+        function jumpToStep(step) {
+            currentStep = parseInt(step);
+            updateViewerForStep(currentStep);
+            if (isPlaying) {
+                pauseSequence(); // Pause if they manually drag the slider
+            }
         }
 
-        isPlaying = true;
-        pauseBtn.disabled = false;
-        resetBtn.disabled = false;
-        setPlaybackStatus("Playing");
-        setStatus("Playing construction sequence.", "ok");
+        // 3. VIEWER INTERACTION (This connects to the 3D Viewer)
+        function updateViewerForStep(step) {
+            // Update UI Slider
+            document.getElementById('step-slider').value = step;
+            
+            if (step === 0) {
+                document.getElementById('status').innerText = "Status: Site Empty (Step 0)";
+                // ACTION: Hide ALL objects in the 3D viewer here
+                console.log("VIEWER API: Hiding all objects");
+                return;
+            }
 
-        await stepOnce();
-        if (!isPlaying) return;
+            const currentObj = modelObjects[step - 1];
+            document.getElementById('status').innerText = `Building Step ${step}: ${currentObj.name}`;
+            
+            // ACTION: Tell the 3D viewer to show objects up to this step
+            // For a 4D simulation, we usually loop through all objects and show/hide based on the current step
+            console.log(`VIEWER API: Showing objects from step 1 to ${step}`);
+        }
 
-        const ms = Number(speedSlider.value) * 1000;
-        intervalId = setInterval(stepOnce, ms);
-      } catch (err) {
-        console.error(err);
-        stopInterval();
-        setStatus("Could not start playback: " + err.message, "error");
-      } finally {
-        playBtn.disabled = !sortedPhases.length;
-      }
-    }
-
-    function pause() {
-      stopInterval();
-      setPlaybackStatus("Paused");
-      setStatus("Paused at phase " + (currentPhaseEl.textContent || "—") + ".");
-    }
-
-    async function reset() {
-      stopInterval();
-      currentIndex = 0;
-      updatePhaseUi();
-      setPlaybackStatus("Resetting");
-      try {
-        await restoreAllObjects();
-        setPlaybackStatus("Ready");
-        setStatus("Model restored to original colors.", "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus("Reset failed: " + err.message, "error");
-      }
-    }
-
-    speedSlider.addEventListener("input", () => {
-      updateSpeedLabel();
-      if (isPlaying) {
-        const ms = Number(speedSlider.value) * 1000;
-        clearInterval(intervalId);
-        intervalId = setInterval(stepOnce, ms);
-      }
-    });
-
-    loadBtn.addEventListener("click", loadData);
-    playBtn.addEventListener("click", play);
-    pauseBtn.addEventListener("click", pause);
-    resetBtn.addEventListener("click", reset);
-
-    updateSpeedLabel();
-    initialize();
-  </script>
+        // Initialize the app when the window loads
+        window.onload = initializeModelData;
+    </script>
 </body>
 </html>
