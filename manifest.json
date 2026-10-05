@@ -1,0 +1,6 @@
+{
+  "url": "https://nihal-asaleem.github.io/4D-Simulator/index.html",
+  "title": "4D Sequence Simulator",
+  "description": "Plays a construction sequence from the ORDER property in Trimble Connect 3D Viewer",
+  "extensionType": ["3dviewer"]
+}
