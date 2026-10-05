@@ -6,7 +6,7 @@
     <title>4D Sequence Simulator</title>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             padding: 16px;
             color: #333;
             background-color: #f9f9f9;
@@ -17,44 +17,17 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        h2 {
-            margin-top: 0;
-            font-size: 18px;
-            color: #005f9e; /* Trimble Blue */
-        }
-        .controls {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
+        h2 { margin-top: 0; font-size: 18px; color: #005f9e; }
+        .controls { display: flex; gap: 10px; margin-bottom: 20px; }
         button {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            background-color: #005f9e;
-            color: white;
-            cursor: pointer;
-            font-weight: bold;
+            padding: 8px 16px; border: none; border-radius: 4px;
+            background-color: #005f9e; color: white; cursor: pointer; font-weight: bold;
         }
-        button:hover {
-            background-color: #004b7d;
-        }
-        button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-        .slider-container {
-            margin-top: 15px;
-        }
-        input[type="range"] {
-            width: 100%;
-        }
-        #status {
-            margin-top: 10px;
-            font-size: 14px;
-            font-weight: bold;
-            color: #555;
-        }
+        button:hover { background-color: #004b7d; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        .slider-container { margin-top: 15px; }
+        input[type="range"] { width: 100%; }
+        #status { margin-top: 10px; font-size: 14px; font-weight: bold; color: #555; }
     </style>
 </head>
 <body>
@@ -76,60 +49,56 @@
         <div id="status">Status: Ready. Waiting to load model data...</div>
     </div>
 
-    <!-- Script to handle the 4D Logic -->
     <script>
-        // Variables to hold our sequence state
         let isPlaying = false;
-        let currentStep = 0;
+        let currentStepIndex = 0;
         let totalSteps = 0;
         let sequenceInterval;
-        let modelObjects = []; // This will hold the objects sorted by ORDER
+        
+        let modelObjects = []; 
+        let sequenceSteps = []; // Stores unique ORDER values
 
-        // 1. MOCK DATA (In production, you fetch this via the Trimble Workspace API)
-        // We simulate objects arriving from the viewer with an "ORDER" property.
+        // 1. DATA INITIALIZATION
         function initializeModelData() {
-            document.getElementById('status').innerText = "Loading model properties...";
+            document.getElementById('status').innerText = "Loading and sorting assemblies...";
             
-            // Simulating API fetch of objects
+            // Simulating API fetch of assemblies with an 'ORDER' parameter
             setTimeout(() => {
                 modelObjects = [
-                    { id: "obj_1", name: "Foundation", ORDER: 1 },
-                    { id: "obj_2", name: "Steel Framing", ORDER: 2 },
-                    { id: "obj_3", name: "First Floor Slab", ORDER: 3 },
-                    { id: "obj_4", name: "Exterior Walls", ORDER: 4 },
-                    { id: "obj_5", name: "Roof", ORDER: 5 }
+                    { id: "guid_1", name: "Foundation A", ORDER: 1 },
+                    { id: "guid_2", name: "Foundation B", ORDER: 1 }, // Same order happens concurrently
+                    { id: "guid_3", name: "Steel Columns", ORDER: 2 },
+                    { id: "guid_4", name: "First Floor Slab", ORDER: 3 },
+                    { id: "guid_5", name: "Exterior Walls", ORDER: 4 },
+                    { id: "guid_6", name: "Roof", ORDER: 5 }
                 ];
                 
-                // Sort objects strictly by the ORDER property
-                modelObjects.sort((a, b) => a.ORDER - b.ORDER);
-                totalSteps = modelObjects.length;
+                // Extract unique ORDER values and sort them sequentially
+                const uniqueOrders = [...new Set(modelObjects.map(obj => obj.ORDER))].sort((a, b) => a - b);
+                sequenceSteps = uniqueOrders;
+                totalSteps = sequenceSteps.length;
                 
-                // Update UI slider to match the number of steps
-                const slider = document.getElementById('step-slider');
-                slider.max = totalSteps;
+                document.getElementById('step-slider').max = totalSteps;
+                document.getElementById('status').innerText = `Status: Loaded ${totalSteps} sequence steps.`;
                 
-                document.getElementById('status').innerText = `Status: Loaded ${totalSteps} construction steps.`;
                 resetSequence();
             }, 1000);
         }
 
         // 2. SEQUENCE CONTROLS
         function playSequence() {
-            if (currentStep >= totalSteps) {
-                resetSequence(); // Loop back if at the end
-            }
+            if (currentStepIndex >= totalSteps) resetSequence(); 
             
             isPlaying = true;
             document.getElementById('btn-play').disabled = true;
             document.getElementById('btn-pause').disabled = false;
             
-            // Step forward every 1.5 seconds
             sequenceInterval = setInterval(() => {
-                if (currentStep < totalSteps) {
-                    currentStep++;
-                    updateViewerForStep(currentStep);
+                if (currentStepIndex < totalSteps) {
+                    currentStepIndex++;
+                    updateViewerForStep(currentStepIndex);
                 } else {
-                    pauseSequence(); // Auto-stop at the end
+                    pauseSequence();
                 }
             }, 1500);
         }
@@ -139,44 +108,72 @@
             clearInterval(sequenceInterval);
             document.getElementById('btn-play').disabled = false;
             document.getElementById('btn-pause').disabled = true;
-            document.getElementById('status').innerText = `Status: Paused at Step ${currentStep} (${modelObjects[currentStep-1]?.name})`;
+            
+            if (currentStepIndex > 0) {
+                document.getElementById('status').innerText = `Status: Paused at Order ${sequenceSteps[currentStepIndex-1]}`;
+            }
         }
 
         function resetSequence() {
             pauseSequence();
-            currentStep = 0;
+            currentStepIndex = 0;
             updateViewerForStep(0);
         }
 
         function jumpToStep(step) {
-            currentStep = parseInt(step);
-            updateViewerForStep(currentStep);
-            if (isPlaying) {
-                pauseSequence(); // Pause if they manually drag the slider
-            }
+            currentStepIndex = parseInt(step);
+            updateViewerForStep(currentStepIndex);
+            if (isPlaying) pauseSequence();
         }
 
-        // 3. VIEWER INTERACTION (This connects to the 3D Viewer)
-        function updateViewerForStep(step) {
-            // Update UI Slider
-            document.getElementById('step-slider').value = step;
+        // 3. COLOR LOGIC & VIEWER INTERACTION
+        function updateViewerForStep(stepIndex) {
+            document.getElementById('step-slider').value = stepIndex;
             
-            if (step === 0) {
-                document.getElementById('status').innerText = "Status: Site Empty (Step 0)";
-                // ACTION: Hide ALL objects in the 3D viewer here
-                console.log("VIEWER API: Hiding all objects");
-                return;
-            }
+            const completedIds = []; 
+            const currentIds = [];   
+            const pendingIds = [];   
+            
+            // Map the current slider step to the actual ORDER parameter value
+            const currentOrder = stepIndex === 0 ? 0 : sequenceSteps[stepIndex - 1];
+            
+            modelObjects.forEach(obj => {
+                if (stepIndex === 0) {
+                    // Step 0: Nothing has started, everything is grey
+                    pendingIds.push(obj.id);
+                } else if (obj.ORDER < currentOrder) {
+                    completedIds.push(obj.id); // Finished -> Green
+                } else if (obj.ORDER === currentOrder) {
+                    currentIds.push(obj.id);   // Active -> Yellow
+                } else {
+                    pendingIds.push(obj.id);   // Future -> Grey
+                }
+            });
 
-            const currentObj = modelObjects[step - 1];
-            document.getElementById('status').innerText = `Building Step ${step}: ${currentObj.name}`;
+            if (stepIndex === 0) {
+                document.getElementById('status').innerText = "Status: Site Empty (Step 0) - All greyed out.";
+            } else {
+                document.getElementById('status').innerText = `Building Step ${stepIndex} (Order: ${currentOrder})`;
+            }
             
-            // ACTION: Tell the 3D viewer to show objects up to this step
-            // For a 4D simulation, we usually loop through all objects and show/hide based on the current step
-            console.log(`VIEWER API: Showing objects from step 1 to ${step}`);
+            applyColorsToViewer(completedIds, currentIds, pendingIds);
         }
 
-        // Initialize the app when the window loads
+        function applyColorsToViewer(completedIds, currentIds, pendingIds) {
+            // ACTION: Replace this block with actual Trimble Workspace API calls.
+            // A typical implementation using the Workspace API viewer colors looks like this:
+            
+            /*
+            WorkspaceAPI.viewer.setColors([
+                ...completedIds.map(id => ({ objectId: id, color: "#00FF00" })), // Green
+                ...currentIds.map(id => ({ objectId: id, color: "#FFFF00" })),   // Yellow
+                ...pendingIds.map(id => ({ objectId: id, color: "#808080" }))    // Grey
+            ]);
+            */
+            
+            console.log(`VIEWER API: Colored ${completedIds.length} Green, ${currentIds.length} Yellow, ${pendingIds.length} Grey`);
+        }
+
         window.onload = initializeModelData;
     </script>
 </body>
