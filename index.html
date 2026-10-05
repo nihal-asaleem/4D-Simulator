@@ -5,12 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>4D Construction Sequence Simulator</title>
   <!--
-    Official Trimble CDN (preferred in production):
-    https://components.connect.trimble.com/trimble-connect-workspace-api/index.js
-    The unpkg package name below matches the assignment. The connect() helper
-    also accepts the official globals: WorkspaceAPI / TrimbleConnectWorkspace.
+    Official IIFE. The old unpkg URL (@trimble/workspace-api) 404s, which left
+    viewer === null and made Load Data show "Viewer is not connected yet."
   -->
-  <script src="https://unpkg.com/@trimble/workspace-api/dist/workspace-api.js"></script>
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
   <style>
     :root {
       --bg: #0f1720;
@@ -307,44 +305,104 @@
     }
 
     /**
-     * Resolve connect() across the assignment global and official Trimble globals.
-     * Official docs use: WorkspaceAPI.connect(window.parent, onEvent)
-     * Sample IIFE uses: TrimbleConnectWorkspace.connect(...)
+     * Official IIFE global is TrimbleConnectWorkspace.
+     * Also accept WorkspaceAPI / TrimbleWorkspaceAPI if a different bundle loads.
      */
     function resolveConnectFn() {
       const candidates = [
-        window.TrimbleWorkspaceAPI,
         window.TrimbleConnectWorkspace,
         window.WorkspaceAPI,
+        window.TrimbleWorkspaceAPI,
         window.trimbleConnectWorkspaceApi
       ];
       for (const api of candidates) {
         if (api && typeof api.connect === "function") return api.connect.bind(api);
       }
-      if (typeof window.TrimbleWorkspaceAPI === "function") return window.TrimbleWorkspaceAPI;
-      throw new Error(
-        "Workspace API script loaded, but no connect() global was found. " +
-        "Check the CDN global name (TrimbleWorkspaceAPI / WorkspaceAPI / TrimbleConnectWorkspace)."
-      );
+      return null;
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const existing = document.querySelector('script[src="' + src + '"]');
+        if (existing && resolveConnectFn()) {
+          resolve();
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Failed to load " + src));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function ensureApiScript() {
+      if (resolveConnectFn()) return;
+      const sources = [
+        "https://components.connect.trimble.com/trimble-connect-workspace-api/index.js",
+        "https://unpkg.com/trimble-connect-workspace-api/dist/iife/trimbleconnect.workspace.api.js"
+      ];
+      let lastError = null;
+      for (const src of sources) {
+        try {
+          await loadScript(src);
+          if (resolveConnectFn()) return;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError || new Error("Workspace API script did not expose connect().");
     }
 
     function onWorkspaceEvent(event, data) {
-      // Useful while debugging viewer events from the parent Connect app.
       console.debug("[WorkspaceAPI event]", event, data);
+    }
+
+    function connectionTargets() {
+      const targets = [];
+      if (window.parent && window.parent !== window) targets.push(window.parent);
+      if (window.top && window.top !== window && window.top !== window.parent) {
+        targets.push(window.top);
+      }
+      return targets;
+    }
+
+    async function connectToViewer() {
+      await ensureApiScript();
+      const connect = resolveConnectFn();
+      if (!connect) {
+        throw new Error("Workspace API loaded, but connect() was not found.");
+      }
+
+      const targets = connectionTargets();
+      if (!targets.length) {
+        throw new Error(
+          "This page is not inside Trimble Connect. Open it from the 3D Viewer side panel, not as a GitHub Pages tab."
+        );
+      }
+
+      let lastError = null;
+      for (const target of targets) {
+        try {
+          // Official: TrimbleConnectWorkspace.connect(window.parent, onEvent, timeoutMs)
+          const api = await connect(target, onWorkspaceEvent, 30000);
+          const nextViewer = api && (api.viewer || (api.api && api.api.viewer));
+          if (!nextViewer) {
+            throw new Error("Connected, but the viewer API is missing. Open a 3D model first.");
+          }
+          workspace = api;
+          viewer = nextViewer;
+          return;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError || new Error("Could not connect to the 3D Viewer.");
     }
 
     async function initialize() {
       try {
-        const connect = resolveConnectFn();
-        // Assignment contract:
-        //   const workspace = await TrimbleWorkspaceAPI.connect(window.parent);
-        // Official signature also accepts an event handler and timeout:
-        //   WorkspaceAPI.connect(window.parent, onEvent, 30000)
-        workspace = await connect(window.parent, onWorkspaceEvent);
-        viewer = workspace.viewer;
-        if (!viewer) {
-          throw new Error("Connected, but workspace.viewer is missing.");
-        }
+        await connectToViewer();
         setStatus("Connected to Trimble Connect 3D Viewer.", "ok");
       } catch (err) {
         console.error(err);
@@ -471,8 +529,15 @@
 
     async function loadData() {
       if (!viewer) {
-        setStatus("Viewer is not connected yet.", "error");
-        return;
+        setStatus("Connecting to the 3D Viewer…");
+        try {
+          await connectToViewer();
+          setStatus("Connected to Trimble Connect 3D Viewer.", "ok");
+        } catch (err) {
+          console.error(err);
+          setStatus("Viewer is not connected yet. " + err.message, "error");
+          return;
+        }
       }
 
       const parameterName = parameterInput.value.trim();
