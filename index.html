@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>4D Simulator Extension</title>
-    <!-- UPDATED: Official Trimble Workspace API -->
-    <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/trimble-connect-workspace-api.js"></script>
+    <!-- Trimble Workspace API -->
+    <script src="https://unpkg.com/@trimble/workspace-api/dist/workspace-api.js"></script>
     
     <style>
         :root {
@@ -128,4 +128,271 @@
     <div class="container">
         <h2>4D Sequence Simulator</h2>
         
-        <!-- Data Loading
+        <!-- Data Loading Section -->
+        <div class="form-group">
+            <label for="paramName">Parameter Name</label>
+            <input type="text" id="paramName" value="Phase">
+        </div>
+        <button id="loadBtn">Load Data</button>
+
+        <!-- Playback Controls -->
+        <div class="form-group">
+            <label>Playback Controls</label>
+            <div class="button-group">
+                <button id="playBtn" disabled>Play</button>
+                <button id="pauseBtn" disabled>Pause</button>
+                <button id="resetBtn" disabled>Reset</button>
+            </div>
+        </div>
+
+        <!-- Speed Slider -->
+        <div class="form-group">
+            <label for="speedSlider">Playback Speed: <span id="speedDisplay">1.0</span>s per step</label>
+            <div class="slider-group">
+                <span>0.5s</span>
+                <input type="range" id="speedSlider" min="0.5" max="3" step="0.1" value="1.0">
+                <span>3.0s</span>
+            </div>
+        </div>
+
+        <!-- Status Display -->
+        <div class="status-panel" id="statusDisplay">
+            Current Phase: --
+        </div>
+    </div>
+
+    <script>
+        let workspace = null;
+        let allObjectIds = [];
+        let phaseGroups = {}; // Maps phase value to array of object IDs
+        let sortedPhases = [];
+        
+        // State variables
+        let currentPhaseIndex = 0;
+        let playbackInterval = null;
+        let isGhosted = false;
+
+        // UI Elements
+        const paramNameInput = document.getElementById('paramName');
+        const loadBtn = document.getElementById('loadBtn');
+        const playBtn = document.getElementById('playBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const speedSlider = document.getElementById('speedSlider');
+        const speedDisplay = document.getElementById('speedDisplay');
+        const statusDisplay = document.getElementById('statusDisplay');
+
+        // Initialize Trimble Workspace API
+        async function init() {
+            try {
+                // Connect to the parent viewer
+                workspace = await TrimbleWorkspaceAPI.connect(window.parent);
+                console.log("Successfully connected to Trimble Workspace API");
+            } catch (error) {
+                console.error("Failed to connect to Trimble Workspace API:", error);
+                statusDisplay.innerText = "Error: Viewer not connected.";
+            }
+        }
+
+        // Handle Speed Slider UI updates
+        speedSlider.addEventListener('input', (e) => {
+            speedDisplay.innerText = parseFloat(e.target.value).toFixed(1);
+            // If playing, restart interval with new speed
+            if (playbackInterval) {
+                pauseSequence();
+                playSequence();
+            }
+        });
+
+        // 1. LOAD DATA
+        loadBtn.addEventListener('click', async () => {
+            if (!workspace) return alert("Workspace API not connected.");
+            
+            const paramName = paramNameInput.value.trim();
+            if (!paramName) return alert("Please enter a parameter name.");
+
+            loadBtn.disabled = true;
+            loadBtn.innerText = "Loading...";
+            
+            try {
+                /* 
+                 * =========================================================
+                 * ADJUSTMENT REQUIRED HERE: 
+                 * The exact method to fetch all objects and properties 
+                 * depends on the Trimble Workspace API version. 
+                 * Usually, you fetch models, then objects, then properties.
+                 * =========================================================
+                 */
+                
+                // Mock logic: Replace with actual API calls to get models and their objects
+                // const models = await workspace.viewer.getModels();
+                // const modelId = models[0].id;
+                // const objects = await workspace.viewer.getObjects(modelId);
+                // allObjectIds = objects.map(obj => obj.id);
+                // const propertiesData = await workspace.viewer.getProperties(modelId, allObjectIds);
+
+                // --- Placeholder: Simulating API response structure for demonstration ---
+                // Expected format: Array of { id: string, properties: { [key: string]: any } }
+                const mockPropertiesData = [
+                    { id: "obj1", properties: { "Phase": "1", "Name": "Foundation" } },
+                    { id: "obj2", properties: { "Phase": "1", "Name": "Slab" } },
+                    { id: "obj3", properties: { "Phase": "2", "Name": "Columns" } },
+                    { id: "obj4", properties: { "Phase": "3", "Name": "Roof" } }
+                ];
+                const propertiesData = mockPropertiesData; // REPLACE THIS with actual API response
+                allObjectIds = propertiesData.map(obj => obj.id);
+                // ------------------------------------------------------------------------
+
+                phaseGroups = {};
+
+                // Group objects by parameter value
+                propertiesData.forEach(item => {
+                    const phaseVal = item.properties[paramName];
+                    if (phaseVal !== undefined && phaseVal !== null) {
+                        // Normalize to string for grouping, but parse to number for sorting later
+                        const key = String(phaseVal);
+                        if (!phaseGroups[key]) {
+                            phaseGroups[key] = [];
+                        }
+                        phaseGroups[key].push(item.id);
+                    }
+                });
+
+                // Sort the grouped phases in ascending numerical order
+                sortedPhases = Object.keys(phaseGroups).sort((a, b) => Number(a) - Number(b));
+
+                if (sortedPhases.length === 0) {
+                    alert(`No objects found with the parameter "${paramName}".`);
+                    resetSequence();
+                    return;
+                }
+
+                statusDisplay.innerText = `Loaded ${sortedPhases.length} phases. Ready.`;
+                
+                // Enable playback controls
+                playBtn.disabled = false;
+                resetBtn.disabled = false;
+
+            } catch (error) {
+                console.error("Error loading data:", error);
+                alert("Error loading data. Check console for details.");
+            } finally {
+                loadBtn.disabled = false;
+                loadBtn.innerText = "Load Data";
+            }
+        });
+
+        // 2. PLAY SEQUENCE
+        async function playSequence() {
+            if (sortedPhases.length === 0 || currentPhaseIndex >= sortedPhases.length) return;
+
+            // Ghost all objects on the very first play click
+            if (!isGhosted) {
+                await ghostAllObjects();
+                isGhosted = true;
+            }
+
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+
+            const speedMs = parseFloat(speedSlider.value) * 1000;
+
+            // Execute first step immediately, then start interval
+            await processNextPhase();
+            
+            playbackInterval = setInterval(async () => {
+                await processNextPhase();
+            }, speedMs);
+        }
+
+        async function processNextPhase() {
+            if (currentPhaseIndex >= sortedPhases.length) {
+                pauseSequence();
+                statusDisplay.innerText = "Sequence Complete";
+                return;
+            }
+
+            const currentPhase = sortedPhases[currentPhaseIndex];
+            const objectIdsForPhase = phaseGroups[currentPhase];
+            
+            statusDisplay.innerText = `Current Phase: ${currentPhase}`;
+            
+            await unhideObjects(objectIdsForPhase);
+            currentPhaseIndex++;
+        }
+
+        // 3. PAUSE SEQUENCE
+        function pauseSequence() {
+            if (playbackInterval) {
+                clearInterval(playbackInterval);
+                playbackInterval = null;
+            }
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+        }
+
+        // 4. RESET SEQUENCE
+        async function resetSequence() {
+            pauseSequence();
+            currentPhaseIndex = 0;
+            isGhosted = false;
+            statusDisplay.innerText = sortedPhases.length > 0 ? "Ready" : "Current Phase: --";
+            
+            if (workspace && allObjectIds.length > 0) {
+                /* 
+                 * =========================================================
+                 * ADJUSTMENT REQUIRED HERE: Reset all objects to original colors.
+                 * E.g., workspace.viewer.resetColors(allObjectIds);
+                 * =========================================================
+                 */
+                console.log("Resetting all objects to original states.");
+                // await workspace.viewer.resetColors();
+            }
+        }
+
+        // EVENT LISTENERS
+        playBtn.addEventListener('click', playSequence);
+        pauseBtn.addEventListener('click', pauseSequence);
+        resetBtn.addEventListener('click', resetSequence);
+
+        // API HELPER: Ghost Objects
+        async function ghostAllObjects() {
+            /* 
+             * =========================================================
+             * ADJUSTMENT REQUIRED HERE: 
+             * Use the exact method from the Trimble API to change colors/opacity.
+             * You may need to pass the modelId alongside the object IDs.
+             * =========================================================
+             */
+            console.log("Ghosting all objects:", allObjectIds);
+            
+            // Example of what the API call might look like:
+            // await workspace.viewer.setColors(allObjectIds, {
+            //     color: { r: 200, g: 200, b: 200 },
+            //     opacity: 0.2
+            // });
+        }
+
+        // API HELPER: Unhide Objects
+        async function unhideObjects(objectIds) {
+            /* 
+             * =========================================================
+             * ADJUSTMENT REQUIRED HERE:
+             * Restore the specific array of IDs to their original state.
+             * Some viewer APIs allow clearing color overrides by passing null,
+             * or you might need a specific `resetColors(objectIds)` method.
+             * =========================================================
+             */
+            console.log("Unhiding objects for current phase:", objectIds);
+            
+            // Example of what the API call might look like:
+            // await workspace.viewer.resetColors(objectIds); 
+            // OR
+            // await workspace.viewer.setColors(objectIds, { opacity: 1.0 });
+        }
+
+        // Bootstrap on load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
