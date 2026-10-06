@@ -173,7 +173,8 @@
 
     <div class="form-group">
         <label for="paramName">Parameter Name (Grouping Property)</label>
-        <input type="text" id="paramName" value="ORDER">
+        <!-- Updated default value to 'Sequence' -->
+        <input type="text" id="paramName" value="Sequence">
     </div>
 
     <button id="btnLoad" class="btn">Load Data</button>
@@ -218,13 +219,13 @@
         
         getProperties: async (objectIds, propertyName) => {
             // TODO: Implement actual API call to fetch properties for given object IDs
+            // The logic below assumes this returns an array: [{ objectId: "...", value: "..." }]
             console.log(`ViewerAPI: Getting property '${propertyName}' for ${objectIds.length} objects`);
-            return []; // Expected to return array of { objectId, value } objects
+            return []; 
         },
 
         setColors: async (objectIds, colorHex, opacity) => {
             // TODO: Implement actual API call to change object colors/opacity
-            // Examples of colorHex: "#d3d3d3", opacity: 0.2
             console.log(`ViewerAPI: Setting color ${colorHex} with opacity ${opacity} for ${objectIds.length} objects`);
         },
 
@@ -285,41 +286,27 @@
             // 1. Get all object IDs in the scene
             State.allObjectIds = await ViewerAPI.getAllObjects();
             
-            // NOTE FOR DEVELOPER: Adjusting Property Fetching Logic
-            // Depending on the Trimble Connect API SDK you are using, the property query
-            // might return a deeply nested object. 
-            // 
-            // Example A (Flat list): [{ id: "obj1", props: { ORDER: "1" } }]
-            // Example B (Grouped by model): [{ modelId: "m1", objects: [{ id: "obj1", properties: [...] }]}]
-            // 
-            // You must map the raw API response into a simple array of objects 
-            // formatted like this: { objectId: string, value: number }
-            
+            // 2. Fetch the metadata properties from the API
             const rawProperties = await ViewerAPI.getProperties(State.allObjectIds, paramName);
             
-            // 2. Group Object IDs by their parameter value
+            // 3. Group Object IDs dynamically by their parameter value
             const groupedMap = new Map();
 
-            // *** REPLACE THIS LOOP with your actual response parsing logic ***
-            // Mocking the parse for demonstration purposes:
-            /*
+            // Actual dynamic parsing logic applied here
             rawProperties.forEach(item => {
+                // Parse the value to a number for accurate chronological sorting
                 const val = parseFloat(item.value); 
+                
+                // Group all object IDs that share the same Sequence value
                 if (!isNaN(val)) {
-                    if (!groupedMap.has(val)) groupedMap.set(val, []);
+                    if (!groupedMap.has(val)) {
+                        groupedMap.set(val, []);
+                    }
                     groupedMap.get(val).push(item.objectId);
                 }
             });
-            */
-            
-            // --- MOCK DATA INJECTION FOR DEMONSTRATION (Remove in production) ---
-            State.allObjectIds = ["obj1", "obj2", "obj3", "obj4", "obj5", "obj6"];
-            groupedMap.set(1, ["obj1", "obj2"]);
-            groupedMap.set(2, ["obj3"]);
-            groupedMap.set(3, ["obj4", "obj5", "obj6"]);
-            // ---------------------------------------------------------------------
 
-            // 3. Sort groups in ascending numerical order based on the parameter value
+            // 4. Sort groups in ascending numerical order based on the parameter value
             State.sequenceData = Array.from(groupedMap.entries())
                 .map(([orderValue, objectIds]) => ({ orderValue, objectIds }))
                 .sort((a, b) => a.orderValue - b.orderValue);
