@@ -4,10 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>4D Construction Sequence Simulator</title>
-  <!--
-    Official IIFE. The old unpkg URL (@trimble/workspace-api) 404s, which left
-    viewer === null and made Load Data show "Viewer is not connected yet."
-  -->
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
   <style>
     :root {
@@ -20,8 +16,7 @@
       --accent: #1a8cff;
       --accent-2: #0ea5e9;
       --good: #22c55e;
-      --warn: #facc15;
-      --pending: #94a3b8;
+      --warn: #f59e0b;
       --danger: #ef4444;
       --shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
       --radius: 12px;
@@ -135,46 +130,8 @@
     .phase-value {
       font-size: 28px;
       font-weight: 750;
-      color: var(--pending);
+      color: #7dd3fc;
     }
-
-    .phase-value.is-pending { color: var(--pending); }
-    .phase-value.is-active { color: var(--warn); }
-    .phase-value.is-completed { color: #4ade80; }
-
-    .legend {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px 14px;
-      margin-top: 12px;
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .legend-item {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .swatch {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      display: inline-block;
-    }
-
-    .swatch.is-pending { background: #bec4cc; opacity: 0.7; }
-    .swatch.is-active { background: var(--warn); }
-    .swatch.is-completed { background: #22c55e; }
-
-    #phaseCard[data-state="pending"] { border-color: #3d4d5f; }
-    #phaseCard[data-state="active"] { border-color: rgba(250, 204, 21, 0.55); }
-    #phaseCard[data-state="completed"] { border-color: rgba(34, 197, 94, 0.55); }
-
-    #playbackStatus.is-pending { color: var(--pending); }
-    #playbackStatus.is-active { color: var(--warn); }
-    #playbackStatus.is-completed { color: #86efac; }
 
     .meta {
       margin-top: 10px;
@@ -217,16 +174,8 @@
       display: block;
       height: 100%;
       width: 0%;
-      background: var(--pending);
-      transition: width 0.2s ease, background 0.2s ease;
-    }
-
-    .progress.is-active > span {
-      background: linear-gradient(90deg, var(--warn), #22c55e);
-    }
-
-    .progress.is-completed > span {
-      background: #22c55e;
+      background: linear-gradient(90deg, var(--accent-2), #22c55e);
+      transition: width 0.2s ease;
     }
   </style>
 </head>
@@ -246,20 +195,15 @@
       <div id="loadMeta" class="meta">Connect to the viewer, then load objects grouped by the parameter above.</div>
     </section>
 
-    <section class="card" id="phaseCard" data-state="pending">
+    <section class="card">
       <div class="phase-box">
         <div>
           <label>Current Phase</label>
-          <div class="phase-value is-pending" id="currentPhase">—</div>
+          <div class="phase-value" id="currentPhase">—</div>
         </div>
-        <div class="status is-pending" id="playbackStatus">Idle</div>
+        <div class="status" id="playbackStatus">Idle</div>
       </div>
-      <div class="progress is-pending" id="progressTrack" aria-hidden="true"><span id="progressBar"></span></div>
-      <div class="legend">
-        <span class="legend-item"><span class="swatch is-pending"></span> Pending (grey)</span>
-        <span class="legend-item"><span class="swatch is-active"></span> In progress (yellow)</span>
-        <span class="legend-item"><span class="swatch is-completed"></span> Done (green)</span>
-      </div>
+      <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
     </section>
 
     <section class="card">
@@ -285,15 +229,6 @@
   </div>
 
   <script>
-    /**
-     * 4D Construction Sequence Simulator
-     * ---------------------------------
-     * Groups 3D objects by a named property (default: "ORDER"), ghosts pending
-     * orders in grey, highlights the active order in yellow, then marks
-     * completed orders green.
-     */
-
-    // ----- DOM -----
     const parameterInput = document.getElementById("parameterName");
     const loadBtn = document.getElementById("loadBtn");
     const playBtn = document.getElementById("playBtn");
@@ -306,51 +241,28 @@
     const statusEl = document.getElementById("status");
     const playbackStatus = document.getElementById("playbackStatus");
     const progressBar = document.getElementById("progressBar");
-    const progressTrack = document.getElementById("progressTrack");
-    const phaseCard = document.getElementById("phaseCard");
 
-    // ----- Runtime state -----
     let workspace = null;
     let viewer = null;
-    /** @type {{ key: string, numeric: number, byModel: { modelId: string, objectRuntimeIds: number[] }[] }[]} */
     let sortedPhases = [];
     let currentIndex = 0;
     let intervalId = null;
     let hasGhosted = false;
     let isPlaying = false;
-    /** @type {"pending" | "active" | "completed"} */
-    let executionState = "pending";
 
-    const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 }; // pending / grey, ~20% alpha
+    const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 };
     const GHOST_OPACITY = 0.2;
-    const ACTIVE_COLOR = { r: 250, g: 204, b: 21, a: 255 }; // in progress / yellow
-    const COMPLETED_COLOR = { r: 34, g: 197, b: 94, a: 255 }; // done / green
-    const EXECUTION_APPEARANCE = {
-      pending: { visible: true, opacity: GHOST_OPACITY, color: GHOST_COLOR },
-      active: { visible: true, opacity: 1, color: ACTIVE_COLOR },
-      completed: { visible: true, opacity: 1, color: COMPLETED_COLOR }
-    };
+    const ACTIVE_COLOR = { r: 253, g: 224, b: 71, a: 255 };
+    const COMPLETED_COLOR = { r: 34, g: 197, b: 94, a: 255 };
     const PROPERTY_BATCH_SIZE = 200;
-    const STATE_BATCH_SIZE = 250;
-    /** @type {Set<string>} */
-    const matchedPropertyNames = new Set();
 
     function setStatus(message, kind = "") {
       statusEl.textContent = message;
       statusEl.className = "status" + (kind ? " " + kind : "");
     }
 
-    function setPlaybackStatus(message, state) {
+    function setPlaybackStatus(message) {
       playbackStatus.textContent = message;
-      if (state) setExecutionUi(state);
-    }
-
-    function setExecutionUi(state) {
-      executionState = state;
-      currentPhaseEl.className = "phase-value is-" + state;
-      playbackStatus.className = "status is-" + state;
-      progressTrack.className = "progress is-" + state;
-      phaseCard.setAttribute("data-state", state);
     }
 
     function updateSpeedLabel() {
@@ -359,18 +271,19 @@
     }
 
     function updatePhaseUi() {
-      if (!sortedPhases.length || currentIndex <= 0) {
+      if (!sortedPhases.length) {
         currentPhaseEl.textContent = "—";
         progressBar.style.width = "0%";
-        if (executionState !== "completed") setExecutionUi("pending");
         return;
       }
-      const activeOrLast = sortedPhases[Math.min(currentIndex, sortedPhases.length) - 1];
-      currentPhaseEl.textContent = String(activeOrLast.key);
-      const ratio = executionState === "completed"
-        ? 1
-        : currentIndex / sortedPhases.length;
-      progressBar.style.width = (ratio * 100).toFixed(1) + "%";
+      if (currentIndex <= 0) {
+        currentPhaseEl.textContent = "—";
+        progressBar.style.width = "0%";
+        return;
+      }
+      const phase = sortedPhases[currentIndex - 1];
+      currentPhaseEl.textContent = String(phase.key);
+      progressBar.style.width = ((currentIndex / sortedPhases.length) * 100).toFixed(1) + "%";
     }
 
     function setControlsEnabled(loaded) {
@@ -379,10 +292,6 @@
       resetBtn.disabled = !loaded;
     }
 
-    /**
-     * Official IIFE global is TrimbleConnectWorkspace.
-     * Also accept WorkspaceAPI / TrimbleWorkspaceAPI if a different bundle loads.
-     */
     function resolveConnectFn() {
       const candidates = [
         window.TrimbleConnectWorkspace,
@@ -459,7 +368,6 @@
       let lastError = null;
       for (const target of targets) {
         try {
-          // Official: TrimbleConnectWorkspace.connect(window.parent, onEvent, timeoutMs)
           const api = await connect(target, onWorkspaceEvent, 30000);
           const nextViewer = api && (api.viewer || (api.api && api.api.viewer));
           if (!nextViewer) {
@@ -485,44 +393,17 @@
       }
     }
 
-    /**
-     * PROPERTY FETCHING — ADJUST HERE IF THE API RESPONSE SHAPE DIFFERS
-     * ----------------------------------------------------------------
-     * Official ViewerAPI:
-     *   getObjects(selector?, objectState?) -> ModelObjects[]
-     *     ModelObjects = { modelId: string, objects: ObjectProperties[] }
-     *     ObjectProperties = { id: number, color?, properties?: PropertySet[] }
-     *
-     *   getObjectProperties(modelId, objectRuntimeIds) -> ObjectProperties[]
-     *
-     *   PropertySet = { name?: string, properties?: Property[] }
-     *   Property    = { name: string, type, value: string | number }
-     *
-     * getObjects() often returns IDs only (no nested properties). This loader
-     * therefore:
-     *   1) lists objects per model via getObjects()
-     *   2) hydrates properties via getObjectProperties() in batches
-     *
-     * Trimble uses *original model property names*, which may differ from the
-     * formatted names shown in the Connect UI (e.g. "ORDER" vs
-     * "IfcBuildingElement.ORDER"). The matcher below is case-insensitive and
-     * also accepts names that end with ".ORDER".
-     *
-     * If your tenant returns a flatter structure, tweak extractParameterMatch().
-     */
-    function extractParameterMatch(objectProperties, parameterName) {
+    function extractParameterValue(objectProperties, parameterName) {
       const wanted = parameterName.trim().toLowerCase();
       if (!wanted) return null;
 
       const propsRoot = objectProperties && objectProperties.properties;
       if (!propsRoot) return null;
 
-      // Some SDK versions return PropertySet[]; others may return a flat map.
       if (!Array.isArray(propsRoot) && typeof propsRoot === "object") {
         for (const [key, value] of Object.entries(propsRoot)) {
           if (propertyNameMatches(key, wanted)) {
-            const normalized = normalizeValue(value);
-            return normalized == null ? null : { value: normalized, name: key };
+            return normalizeValue(value);
           }
         }
         return null;
@@ -530,15 +411,13 @@
 
       for (const set of propsRoot) {
         if (set && propertyNameMatches(set.name, wanted) && set.value != null) {
-          const normalized = normalizeValue(set.value);
-          if (normalized != null) return { value: normalized, name: set.name };
+          return normalizeValue(set.value);
         }
         const inner = (set && set.properties) || [];
         for (const prop of inner) {
           if (!prop) continue;
           if (propertyNameMatches(prop.name, wanted)) {
-            const normalized = normalizeValue(prop.value);
-            if (normalized != null) return { value: normalized, name: prop.name };
+            return normalizeValue(prop.value);
           }
         }
       }
@@ -566,7 +445,6 @@
     }
 
     async function getAllModelObjects() {
-      // Empty selector => all loaded objects.
       if (typeof viewer.getObjects === "function") {
         const models = await viewer.getObjects();
         if (Array.isArray(models)) return models;
@@ -595,24 +473,14 @@
       return results;
     }
 
-    function toRuntimeId(value) {
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-      if (typeof value === "string" && value.trim() !== "") {
-        const n = Number(value);
-        if (Number.isFinite(n)) return n;
-      }
-      return null;
-    }
-
     function collectRuntimeIds(modelEntry) {
       const objects = modelEntry.objects || modelEntry.objectRuntimeIds || [];
-      if (!Array.isArray(objects)) return [];
-      if (objects.length && (typeof objects[0] === "number" || typeof objects[0] === "string")) {
-        return objects.map(toRuntimeId).filter((id) => id != null);
+      if (Array.isArray(objects) && typeof objects[0] === "number") {
+        return objects;
       }
       return objects
-        .map((obj) => obj && toRuntimeId(obj.id ?? obj.runtimeId ?? obj.objectRuntimeId))
-        .filter((id) => id != null);
+        .map((obj) => (obj && (obj.id ?? obj.runtimeId ?? obj.objectRuntimeId)))
+        .filter((id) => typeof id === "number");
     }
 
     async function loadData() {
@@ -649,10 +517,6 @@
           throw new Error("No objects were returned. Load a 3D model in the viewer first.");
         }
 
-        matchedPropertyNames.clear();
-        matchedPropertyNames.add(parameterName);
-
-        /** @type {Map<string, Map<string, number[]>>} phaseKey -> modelId -> ids */
         const grouped = new Map();
         let scanned = 0;
         let matched = 0;
@@ -668,19 +532,18 @@
           const propList = await getPropertiesForIds(modelId, runtimeIds);
           const byId = new Map();
           for (const item of propList) {
-            const id = toRuntimeId(item.id ?? item.runtimeId);
-            if (id != null) byId.set(id, item);
+            const id = item.id ?? item.runtimeId;
+            if (typeof id === "number") byId.set(id, item);
           }
 
           for (const runtimeId of runtimeIds) {
             const props = byId.get(runtimeId) || {};
-            const match = extractParameterMatch(props, parameterName);
-            if (!match) continue;
+            const value = extractParameterValue(props, parameterName);
+            if (value == null || value === "") continue;
             matched += 1;
-            if (match.name) matchedPropertyNames.add(match.name);
 
-            if (!grouped.has(match.value)) grouped.set(match.value, new Map());
-            const perModel = grouped.get(match.value);
+            if (!grouped.has(value)) grouped.set(value, new Map());
+            const perModel = grouped.get(value);
             if (!perModel.has(modelId)) perModel.set(modelId, []);
             perModel.get(modelId).push(runtimeId);
           }
@@ -717,8 +580,7 @@
         currentIndex = 0;
         updatePhaseUi();
         setControlsEnabled(true);
-        setPlaybackStatus("Ready", "pending");
-        setExecutionUi("pending");
+        setPlaybackStatus("Ready");
         setStatus("Data loaded. Press Play to start the sequence.", "ok");
       } catch (err) {
         console.error(err);
@@ -728,125 +590,62 @@
       }
     }
 
-    /**
-     * COLOR / OPACITY BY EXECUTION STATE
-     * ----------------------------------
-     * pending   → ghost grey, 20% opacity (not started)
-     * active    → opaque yellow (order currently executing)
-     * completed → opaque green (finished; stays green)
-     *
-     * Working SDK samples pass a flat selector:
-     *   { modelId, objectRuntimeIds }
-     * Official ObjectSelector wraps that as:
-     *   { modelObjectIds: [{ modelId, objectRuntimeIds }] }
-     */
     async function applyState(selector, objectState) {
       await viewer.setObjectState(selector, objectState);
     }
 
-    async function applyStateToIds(modelId, ids, objectState) {
-      const objectRuntimeIds = ids.map(toRuntimeId).filter((id) => id != null);
-      if (!objectRuntimeIds.length) return;
-
-      for (let i = 0; i < objectRuntimeIds.length; i += STATE_BATCH_SIZE) {
-        const batch = objectRuntimeIds.slice(i, i + STATE_BATCH_SIZE);
-        await applyState(
-          { modelId: modelId, objectRuntimeIds: batch, recursive: true },
-          objectState
-        );
-        await applyState(
-          { modelObjectIds: [{ modelId: modelId, objectRuntimeIds: batch, recursive: true }] },
-          objectState
-        );
-      }
-    }
-
-    async function applyStateByParameter(parameterName, rawValue, objectState) {
-      const names = new Set(matchedPropertyNames);
-      names.add(parameterName);
-      const values = [rawValue];
-      const numeric = Number(rawValue);
-      if (Number.isFinite(numeric)) values.push(numeric);
-
-      for (const name of names) {
-        for (const value of values) {
-          try {
-            await applyState(
-              { parameter: { properties: { [name]: value } } },
-              objectState
-            );
-          } catch (err) {
-            console.debug("parameter selector skipped", name, value, err);
-          }
-        }
-      }
-    }
-
-    async function applyPhaseAppearance(phase, stateName) {
-      const objectState = EXECUTION_APPEARANCE[stateName];
-      const parameterName = parameterInput.value.trim() || "ORDER";
-      for (const group of phase.byModel) {
-        await applyStateToIds(group.modelId, group.objectRuntimeIds, objectState);
-      }
-      await applyStateByParameter(parameterName, phase.key, objectState);
-    }
-
     async function ghostEntireModel() {
-      await applyState(undefined, EXECUTION_APPEARANCE.pending);
+      await applyState(undefined, {
+        color: GHOST_COLOR,
+        opacity: GHOST_OPACITY
+      });
       hasGhosted = true;
-      setExecutionUi("pending");
     }
 
-    function stopPlaybackTimer() {
-      if (intervalId != null) {
-        clearTimeout(intervalId);
-        clearInterval(intervalId);
-        intervalId = null;
+    async function setPhaseState(phase, colorRGBA) {
+      for (const group of phase.byModel) {
+        await applyState(
+          { modelObjectIds: [{ modelId: group.modelId, objectRuntimeIds: group.objectRuntimeIds }] },
+          { color: colorRGBA, opacity: 1 }
+        );
       }
+    }
+
+    async function restoreAllObjects() {
+      await applyState(undefined, { color: "reset", opacity: 1, visible: "reset" });
+      hasGhosted = false;
     }
 
     function stopInterval() {
-      stopPlaybackTimer();
+      if (intervalId != null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
       isPlaying = false;
       pauseBtn.disabled = true;
     }
 
-    function waitForSpeed() {
-      const ms = Number(speedSlider.value) * 1000;
-      return new Promise((resolve) => {
-        intervalId = setTimeout(resolve, ms);
-      });
-    }
-
     async function stepOnce() {
+      if (currentIndex >= sortedPhases.length) {
+        if (currentIndex > 0) {
+          await setPhaseState(sortedPhases[currentIndex - 1], COMPLETED_COLOR);
+        }
+        stopInterval();
+        setPlaybackStatus("Complete");
+        setStatus("Sequence finished. Reset to play again.", "ok");
+        return;
+      }
+
+      const phase = sortedPhases[currentIndex];
       try {
         if (currentIndex > 0) {
-          const previous = sortedPhases[currentIndex - 1];
-          await applyPhaseAppearance(previous, "completed");
+          await setPhaseState(sortedPhases[currentIndex - 1], COMPLETED_COLOR);
         }
-
-        if (currentIndex >= sortedPhases.length) {
-          stopInterval();
-          setPlaybackStatus("Complete", "completed");
-          progressBar.style.width = "100%";
-          if (sortedPhases.length) {
-            currentPhaseEl.textContent = String(sortedPhases[sortedPhases.length - 1].key);
-          }
-          setStatus("Sequence finished. All orders are green. Reset to play again.", "ok");
-          return;
-        }
-
-        const phase = sortedPhases[currentIndex];
-        const objectCount = phase.byModel.reduce(
-          (sum, group) => sum + (group.objectRuntimeIds ? group.objectRuntimeIds.length : 0),
-          0
-        );
-        setStatus("ORDER " + phase.key + " in progress (" + objectCount + " objects)…");
-        await applyPhaseAppearance(phase, "active");
+        await setPhaseState(phase, ACTIVE_COLOR);
+        
         currentIndex += 1;
-        setExecutionUi("active");
         updatePhaseUi();
-        setPlaybackStatus("Playing", "active");
+        setPlaybackStatus("Playing");
       } catch (err) {
         console.error(err);
         stopInterval();
@@ -860,32 +659,28 @@
 
       playBtn.disabled = true;
       try {
-        if (currentIndex >= sortedPhases.length || executionState === "completed") {
+        if (currentIndex >= sortedPhases.length) {
+          await restoreAllObjects();
           currentIndex = 0;
-          setExecutionUi("pending");
           updatePhaseUi();
-          hasGhosted = false;
         }
 
         if (!hasGhosted) {
-          setStatus("Ghosting pending orders…");
+          setStatus("Ghosting the model…");
           await ghostEntireModel();
         }
 
         isPlaying = true;
         pauseBtn.disabled = false;
         resetBtn.disabled = false;
-        setPlaybackStatus("Playing", "active");
+        setPlaybackStatus("Playing");
         setStatus("Playing construction sequence.", "ok");
 
         await stepOnce();
-        while (isPlaying) {
-          await waitForSpeed();
-          if (!isPlaying) break;
-          const finishing = currentIndex >= sortedPhases.length;
-          await stepOnce();
-          if (finishing || !isPlaying) break;
-        }
+        if (!isPlaying) return;
+
+        const ms = Number(speedSlider.value) * 1000;
+        intervalId = setInterval(stepOnce, ms);
       } catch (err) {
         console.error(err);
         stopInterval();
@@ -897,19 +692,19 @@
 
     function pause() {
       stopInterval();
-      setPlaybackStatus("Paused", executionState);
+      setPlaybackStatus("Paused");
       setStatus("Paused at phase " + (currentPhaseEl.textContent || "—") + ".");
     }
 
     async function reset() {
       stopInterval();
       currentIndex = 0;
-      setPlaybackStatus("Resetting", "pending");
+      updatePhaseUi();
+      setPlaybackStatus("Resetting");
       try {
-        await ghostEntireModel();
-        updatePhaseUi();
-        setPlaybackStatus("Ready", "pending");
-        setStatus("All orders are pending (grey). Press Play to start.", "ok");
+        await restoreAllObjects();
+        setPlaybackStatus("Ready");
+        setStatus("Model restored to original colors.", "ok");
       } catch (err) {
         console.error(err);
         setStatus("Reset failed: " + err.message, "error");
@@ -918,6 +713,11 @@
 
     speedSlider.addEventListener("input", () => {
       updateSpeedLabel();
+      if (isPlaying) {
+        const ms = Number(speedSlider.value) * 1000;
+        clearInterval(intervalId);
+        intervalId = setInterval(stepOnce, ms);
+      }
     });
 
     loadBtn.addEventListener("click", loadData);
