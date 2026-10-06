@@ -266,7 +266,13 @@
 
     const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 }; // light grey, ~20% alpha (0–255)
     const GHOST_OPACITY = 0.2;
+    const SOLID_COLOR = { r: 46, g: 125, b: 246, a: 255 }; // opaque if original color is unknown
     const PROPERTY_BATCH_SIZE = 200;
+    const STATE_BATCH_SIZE = 250;
+    /** @type {Map<string, string | {r:number,g:number,b:number,a:number}>} */
+    const originalColors = new Map();
+    /** @type {Set<string>} */
+    const matchedPropertyNames = new Set();
 
     function setStatus(message, kind = "") {
       statusEl.textContent = message;
@@ -433,9 +439,9 @@
      * "IfcBuildingElement.ORDER"). The matcher below is case-insensitive and
      * also accepts names that end with ".ORDER".
      *
-     * If your tenant returns a flatter structure, tweak extractParameterValue().
+     * If your tenant returns a flatter structure, tweak extractParameterMatch().
      */
-    function extractParameterValue(objectProperties, parameterName) {
+    function extractParameterMatch(objectProperties, parameterName) {
       const wanted = parameterName.trim().toLowerCase();
       if (!wanted) return null;
 
@@ -446,7 +452,8 @@
       if (!Array.isArray(propsRoot) && typeof propsRoot === "object") {
         for (const [key, value] of Object.entries(propsRoot)) {
           if (propertyNameMatches(key, wanted)) {
-            return normalizeValue(value);
+            const normalized = normalizeValue(value);
+            return normalized == null ? null : { value: normalized, name: key };
           }
         }
         return null;
@@ -454,13 +461,15 @@
 
       for (const set of propsRoot) {
         if (set && propertyNameMatches(set.name, wanted) && set.value != null) {
-          return normalizeValue(set.value);
+          const normalized = normalizeValue(set.value);
+          if (normalized != null) return { value: normalized, name: set.name };
         }
         const inner = (set && set.properties) || [];
         for (const prop of inner) {
           if (!prop) continue;
           if (propertyNameMatches(prop.name, wanted)) {
-            return normalizeValue(prop.value);
+            const normalized = normalizeValue(prop.value);
+            if (normalized != null) return { value: normalized, name: prop.name };
           }
         }
       }
@@ -517,14 +526,28 @@
       return results;
     }
 
+    function toRuntimeId(value) {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim() !== "") {
+        const n = Number(value);
+        if (Number.isFinite(n)) return n;
+      }
+      return null;
+    }
+
     function collectRuntimeIds(modelEntry) {
       const objects = modelEntry.objects || modelEntry.objectRuntimeIds || [];
-      if (Array.isArray(objects) && typeof objects[0] === "number") {
-        return objects;
+      if (!Array.isArray(objects)) return [];
+      if (objects.length && (typeof objects[0] === "number" || typeof objects[0] === "string")) {
+        return objects.map(toRuntimeId).filter((id) => id != null);
       }
       return objects
-        .map((obj) => (obj && (obj.id ?? obj.runtimeId ?? obj.objectRuntimeId)))
-        .filter((id) => typeof id === "number");
+        .map((obj) => obj && toRuntimeId(obj.id ?? obj.runtimeId ?? obj.objectRuntimeId))
+        .filter((id) => id != null);
+    }
+
+    function colorKey(modelId, runtimeId) {
+      return modelId + ":" + runtimeId;
     }
 
     async function loadData() {
@@ -561,6 +584,10 @@
           throw new Error("No objects were returned. Load a 3D model in the viewer first.");
         }
 
+        originalColors.clear();
+        matchedPropertyNames.clear();
+        matchedPropertyNames.add(parameterName);
+
         /** @type {Map<string, Map<string, number[]>>} phaseKey -> modelId -> ids */
         const grouped = new Map();
         let scanned = 0;
@@ -577,18 +604,20 @@
           const propList = await getPropertiesForIds(modelId, runtimeIds);
           const byId = new Map();
           for (const item of propList) {
-            const id = item.id ?? item.runtimeId;
-            if (typeof id === "number") byId.set(id, item);
+            const id = toRuntimeId(item.id ?? item.runtimeId);
+            if (id != null) byId.set(id, item);
           }
 
           for (const runtimeId of runtimeIds) {
             const props = byId.get(runtimeId) || {};
-            const value = extractParameterValue(props, parameterName);
-            if (value == null || value === "") continue;
+            const match = extractParameterMatch(props, parameterName);
+            if (!match) continue;
             matched += 1;
+            if (match.name) matchedPropertyNames.add(match.name);
+            if (props.color) originalColors.set(colorKey(modelId, runtimeId), props.color);
 
-            if (!grouped.has(value)) grouped.set(value, new Map());
-            const perModel = grouped.get(value);
+            if (!grouped.has(match.value)) grouped.set(match.value, new Map());
+            const perModel = grouped.get(match.value);
             if (!perModel.has(modelId)) perModel.set(modelId, []);
             perModel.get(modelId).push(runtimeId);
           }
@@ -638,30 +667,91 @@
     /**
      * COLOR / OPACITY
      * ---------------
-     * viewer.setObjectState(selector | undefined, objectState)
-     *   undefined selector => ALL objects in loaded models
-     * ObjectState: { color?: string | ColorRGBA | "reset", opacity?: number, visible?: boolean | "reset" }
-     * ColorRGBA channels are 0–255, including alpha.
+     * Working SDK samples pass a flat selector:
+     *   { modelId, objectRuntimeIds }
+     * Official ObjectSelector wraps that as:
+     *   { modelObjectIds: [{ modelId, objectRuntimeIds }] }
+     * Ghosting with `undefined` works. Revealing with only the wrapped form
+     * often matches nothing, so objects stay ghosted while the UI still ticks.
+     *
+     * Do not rely on color: "reset" for the sequence — it frequently leaves
+     * the previous ghost color in place. Reveal with an opaque color instead.
      */
     async function applyState(selector, objectState) {
       await viewer.setObjectState(selector, objectState);
     }
 
+    function revealStateForIds(modelId, ids) {
+      const firstColor = ids
+        .map((id) => originalColors.get(colorKey(modelId, id)))
+        .find(Boolean);
+      return {
+        visible: true,
+        opacity: 1,
+        color: firstColor || SOLID_COLOR
+      };
+    }
+
+    async function applyStateToIds(modelId, ids, objectState) {
+      const objectRuntimeIds = ids.map(toRuntimeId).filter((id) => id != null);
+      if (!objectRuntimeIds.length) return;
+
+      for (let i = 0; i < objectRuntimeIds.length; i += STATE_BATCH_SIZE) {
+        const batch = objectRuntimeIds.slice(i, i + STATE_BATCH_SIZE);
+        // Format used by Trimble samples / setSelection / setCamera
+        await applyState(
+          { modelId: modelId, objectRuntimeIds: batch, recursive: true },
+          objectState
+        );
+        // Official ObjectSelector shape
+        await applyState(
+          { modelObjectIds: [{ modelId: modelId, objectRuntimeIds: batch, recursive: true }] },
+          objectState
+        );
+      }
+    }
+
+    async function applyStateByParameter(parameterName, rawValue, objectState) {
+      const names = new Set(matchedPropertyNames);
+      names.add(parameterName);
+      const values = [rawValue];
+      const numeric = Number(rawValue);
+      if (Number.isFinite(numeric)) values.push(numeric);
+
+      for (const name of names) {
+        for (const value of values) {
+          try {
+            await applyState(
+              { parameter: { properties: { [name]: value } } },
+              objectState
+            );
+          } catch (err) {
+            console.debug("parameter selector skipped", name, value, err);
+          }
+        }
+      }
+    }
+
     async function ghostEntireModel() {
       await applyState(undefined, {
         color: GHOST_COLOR,
-        opacity: GHOST_OPACITY
+        opacity: GHOST_OPACITY,
+        visible: true
       });
       hasGhosted = true;
     }
 
     async function restorePhase(phase) {
+      const parameterName = parameterInput.value.trim() || "ORDER";
       for (const group of phase.byModel) {
-        await applyState(
-          { modelObjectIds: [{ modelId: group.modelId, objectRuntimeIds: group.objectRuntimeIds }] },
-          { color: "reset", opacity: 1 }
-        );
+        const state = revealStateForIds(group.modelId, group.objectRuntimeIds);
+        await applyStateToIds(group.modelId, group.objectRuntimeIds, state);
       }
+      await applyStateByParameter(parameterName, phase.key, {
+        visible: true,
+        opacity: 1,
+        color: SOLID_COLOR
+      });
     }
 
     async function restoreAllObjects() {
@@ -669,13 +759,25 @@
       hasGhosted = false;
     }
 
-    function stopInterval() {
+    function stopPlaybackTimer() {
       if (intervalId != null) {
+        clearTimeout(intervalId);
         clearInterval(intervalId);
         intervalId = null;
       }
+    }
+
+    function stopInterval() {
+      stopPlaybackTimer();
       isPlaying = false;
       pauseBtn.disabled = true;
+    }
+
+    function waitForSpeed() {
+      const ms = Number(speedSlider.value) * 1000;
+      return new Promise((resolve) => {
+        intervalId = setTimeout(resolve, ms);
+      });
     }
 
     async function stepOnce() {
@@ -687,6 +789,11 @@
       }
 
       const phase = sortedPhases[currentIndex];
+      const objectCount = phase.byModel.reduce(
+        (sum, group) => sum + (group.objectRuntimeIds ? group.objectRuntimeIds.length : 0),
+        0
+      );
+      setStatus("Revealing ORDER " + phase.key + " (" + objectCount + " objects)…");
       try {
         await restorePhase(phase);
         currentIndex += 1;
@@ -723,10 +830,11 @@
         setStatus("Playing construction sequence.", "ok");
 
         await stepOnce();
-        if (!isPlaying) return;
-
-        const ms = Number(speedSlider.value) * 1000;
-        intervalId = setInterval(stepOnce, ms);
+        while (isPlaying && currentIndex < sortedPhases.length) {
+          await waitForSpeed();
+          if (!isPlaying) break;
+          await stepOnce();
+        }
       } catch (err) {
         console.error(err);
         stopInterval();
@@ -759,11 +867,6 @@
 
     speedSlider.addEventListener("input", () => {
       updateSpeedLabel();
-      if (isPlaying) {
-        const ms = Number(speedSlider.value) * 1000;
-        clearInterval(intervalId);
-        intervalId = setInterval(stepOnce, ms);
-      }
     });
 
     loadBtn.addEventListener("click", loadData);
