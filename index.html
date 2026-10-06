@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>4D Simulator Extension</title>
     <!-- Trimble Workspace API -->
-    <script src="https://unpkg.com/@trimble/workspace-api/dist/workspace-api.js"></script>
+    <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/trimble-connect-workspace-api.js"></script>
     
     <style>
         :root {
@@ -185,14 +185,14 @@
         // Initialize Trimble Workspace API
         async function init() {
             try {
-                // Connect to the parent viewer
-                workspace = await TrimbleWorkspaceAPI.connect(window.parent);
-                console.log("Successfully connected to Trimble Workspace API");
-            } catch (error) {
-                console.error("Failed to connect to Trimble Workspace API:", error);
-                statusDisplay.innerText = "Error: Viewer not connected.";
-            }
-        }
+        // Change from TrimbleWorkspaceAPI to WorkspaceAPI
+        workspace = await WorkspaceAPI.connect(window.parent);
+        console.log("Successfully connected to Trimble Workspace API");
+    } catch (error) {
+        console.error("Failed to connect to Trimble Workspace API:", error);
+        statusDisplay.innerText = "Error: Viewer not connected.";
+    }
+}
 
         // Handle Speed Slider UI updates
         speedSlider.addEventListener('input', (e) => {
