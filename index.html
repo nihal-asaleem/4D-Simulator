@@ -3,31 +3,124 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>4D Sequence Simulator</title>
+    <title>4D Simulator Extension</title>
+    <!-- Trimble Workspace API -->
+    <script src="https://unpkg.com/@trimble/workspace-api/dist/workspace-api.js"></script>
+    
     <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --panel-bg: #ffffff;
+            --text-main: #333333;
+            --primary: #005f9e;
+            --primary-hover: #004c80;
+            --border: #e0e0e0;
+            --danger: #dc3545;
+            --danger-hover: #c82333;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
             padding: 16px;
-            color: #333;
-            background-color: #f9f9f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            box-sizing: border-box;
         }
+
         .container {
-            background: white;
-            padding: 20px;
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
-        h2 { margin-top: 0; font-size: 18px; color: #005f9e; }
-        .controls { display: flex; gap: 10px; margin-bottom: 20px; }
+
+        h2 {
+            margin: 0 0 8px 0;
+            font-size: 1.2rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        input[type="text"] {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
         button {
-            padding: 8px 16px; border: none; border-radius: 4px;
-            background-color: #005f9e; color: white; cursor: pointer; font-weight: bold;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 4px;
+            background-color: var(--primary);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            font-size: 0.9rem;
         }
-        button:hover { background-color: #004b7d; }
-        button:disabled { background-color: #cccccc; cursor: not-allowed; }
-        .slider-container { margin-top: 15px; }
-        input[type="range"] { width: 100%; }
-        #status { margin-top: 10px; font-size: 14px; font-weight: bold; color: #555; }
+
+        button:hover:not(:disabled) {
+            background-color: var(--primary-hover);
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .button-group button {
+            flex: 1;
+        }
+
+        #resetBtn {
+            background-color: var(--danger);
+        }
+        
+        #resetBtn:hover:not(:disabled) {
+            background-color: var(--danger-hover);
+        }
+
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        input[type="range"] {
+            flex: 1;
+        }
+
+        .status-panel {
+            background-color: var(--bg-color);
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
     </style>
 </head>
 <body>
@@ -35,146 +128,271 @@
     <div class="container">
         <h2>4D Sequence Simulator</h2>
         
-        <div class="controls">
-            <button id="btn-play" onclick="playSequence()">Play</button>
-            <button id="btn-pause" onclick="pauseSequence()" disabled>Pause</button>
-            <button id="btn-reset" onclick="resetSequence()">Reset</button>
+        <!-- Data Loading Section -->
+        <div class="form-group">
+            <label for="paramName">Parameter Name</label>
+            <input type="text" id="paramName" value="Phase">
+        </div>
+        <button id="loadBtn">Load Data</button>
+
+        <!-- Playback Controls -->
+        <div class="form-group">
+            <label>Playback Controls</label>
+            <div class="button-group">
+                <button id="playBtn" disabled>Play</button>
+                <button id="pauseBtn" disabled>Pause</button>
+                <button id="resetBtn" disabled>Reset</button>
+            </div>
         </div>
 
-        <div class="slider-container">
-            <label for="step-slider">Construction Progress:</label>
-            <input type="range" id="step-slider" min="0" max="100" value="0" onchange="jumpToStep(this.value)">
+        <!-- Speed Slider -->
+        <div class="form-group">
+            <label for="speedSlider">Playback Speed: <span id="speedDisplay">1.0</span>s per step</label>
+            <div class="slider-group">
+                <span>0.5s</span>
+                <input type="range" id="speedSlider" min="0.5" max="3" step="0.1" value="1.0">
+                <span>3.0s</span>
+            </div>
         </div>
 
-        <div id="status">Status: Ready. Waiting to load model data...</div>
+        <!-- Status Display -->
+        <div class="status-panel" id="statusDisplay">
+            Current Phase: --
+        </div>
     </div>
 
     <script>
-        let isPlaying = false;
-        let currentStepIndex = 0;
-        let totalSteps = 0;
-        let sequenceInterval;
+        let workspace = null;
+        let allObjectIds = [];
+        let phaseGroups = {}; // Maps phase value to array of object IDs
+        let sortedPhases = [];
         
-        let modelObjects = []; 
-        let sequenceSteps = []; // Stores unique ORDER values
+        // State variables
+        let currentPhaseIndex = 0;
+        let playbackInterval = null;
+        let isGhosted = false;
 
-        // 1. DATA INITIALIZATION
-        function initializeModelData() {
-            document.getElementById('status').innerText = "Loading and sorting assemblies...";
+        // UI Elements
+        const paramNameInput = document.getElementById('paramName');
+        const loadBtn = document.getElementById('loadBtn');
+        const playBtn = document.getElementById('playBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const speedSlider = document.getElementById('speedSlider');
+        const speedDisplay = document.getElementById('speedDisplay');
+        const statusDisplay = document.getElementById('statusDisplay');
+
+        // Initialize Trimble Workspace API
+        async function init() {
+            try {
+                // Connect to the parent viewer
+                workspace = await TrimbleWorkspaceAPI.connect(window.parent);
+                console.log("Successfully connected to Trimble Workspace API");
+            } catch (error) {
+                console.error("Failed to connect to Trimble Workspace API:", error);
+                statusDisplay.innerText = "Error: Viewer not connected.";
+            }
+        }
+
+        // Handle Speed Slider UI updates
+        speedSlider.addEventListener('input', (e) => {
+            speedDisplay.innerText = parseFloat(e.target.value).toFixed(1);
+            // If playing, restart interval with new speed
+            if (playbackInterval) {
+                pauseSequence();
+                playSequence();
+            }
+        });
+
+        // 1. LOAD DATA
+        loadBtn.addEventListener('click', async () => {
+            if (!workspace) return alert("Workspace API not connected.");
             
-            // Simulating API fetch of assemblies with an 'ORDER' parameter
-            setTimeout(() => {
-                modelObjects = [
-                    { id: "guid_1", name: "Foundation A", ORDER: 1 },
-                    { id: "guid_2", name: "Foundation B", ORDER: 1 }, // Same order happens concurrently
-                    { id: "guid_3", name: "Steel Columns", ORDER: 2 },
-                    { id: "guid_4", name: "First Floor Slab", ORDER: 3 },
-                    { id: "guid_5", name: "Exterior Walls", ORDER: 4 },
-                    { id: "guid_6", name: "Roof", ORDER: 5 }
+            const paramName = paramNameInput.value.trim();
+            if (!paramName) return alert("Please enter a parameter name.");
+
+            loadBtn.disabled = true;
+            loadBtn.innerText = "Loading...";
+            
+            try {
+                /* 
+                 * =========================================================
+                 * ADJUSTMENT REQUIRED HERE: 
+                 * The exact method to fetch all objects and properties 
+                 * depends on the Trimble Workspace API version. 
+                 * Usually, you fetch models, then objects, then properties.
+                 * =========================================================
+                 */
+                
+                // Mock logic: Replace with actual API calls to get models and their objects
+                // const models = await workspace.viewer.getModels();
+                // const modelId = models[0].id;
+                // const objects = await workspace.viewer.getObjects(modelId);
+                // allObjectIds = objects.map(obj => obj.id);
+                // const propertiesData = await workspace.viewer.getProperties(modelId, allObjectIds);
+
+                // --- Placeholder: Simulating API response structure for demonstration ---
+                // Expected format: Array of { id: string, properties: { [key: string]: any } }
+                const mockPropertiesData = [
+                    { id: "obj1", properties: { "Phase": "1", "Name": "Foundation" } },
+                    { id: "obj2", properties: { "Phase": "1", "Name": "Slab" } },
+                    { id: "obj3", properties: { "Phase": "2", "Name": "Columns" } },
+                    { id: "obj4", properties: { "Phase": "3", "Name": "Roof" } }
                 ];
-                
-                // Extract unique ORDER values and sort them sequentially
-                const uniqueOrders = [...new Set(modelObjects.map(obj => obj.ORDER))].sort((a, b) => a - b);
-                sequenceSteps = uniqueOrders;
-                totalSteps = sequenceSteps.length;
-                
-                document.getElementById('step-slider').max = totalSteps;
-                document.getElementById('status').innerText = `Status: Loaded ${totalSteps} sequence steps.`;
-                
-                resetSequence();
-            }, 1000);
-        }
+                const propertiesData = mockPropertiesData; // REPLACE THIS with actual API response
+                allObjectIds = propertiesData.map(obj => obj.id);
+                // ------------------------------------------------------------------------
 
-        // 2. SEQUENCE CONTROLS
-        function playSequence() {
-            if (currentStepIndex >= totalSteps) resetSequence(); 
-            
-            isPlaying = true;
-            document.getElementById('btn-play').disabled = true;
-            document.getElementById('btn-pause').disabled = false;
-            
-            sequenceInterval = setInterval(() => {
-                if (currentStepIndex < totalSteps) {
-                    currentStepIndex++;
-                    updateViewerForStep(currentStepIndex);
-                } else {
-                    pauseSequence();
+                phaseGroups = {};
+
+                // Group objects by parameter value
+                propertiesData.forEach(item => {
+                    const phaseVal = item.properties[paramName];
+                    if (phaseVal !== undefined && phaseVal !== null) {
+                        // Normalize to string for grouping, but parse to number for sorting later
+                        const key = String(phaseVal);
+                        if (!phaseGroups[key]) {
+                            phaseGroups[key] = [];
+                        }
+                        phaseGroups[key].push(item.id);
+                    }
+                });
+
+                // Sort the grouped phases in ascending numerical order
+                sortedPhases = Object.keys(phaseGroups).sort((a, b) => Number(a) - Number(b));
+
+                if (sortedPhases.length === 0) {
+                    alert(`No objects found with the parameter "${paramName}".`);
+                    resetSequence();
+                    return;
                 }
-            }, 1500);
+
+                statusDisplay.innerText = `Loaded ${sortedPhases.length} phases. Ready.`;
+                
+                // Enable playback controls
+                playBtn.disabled = false;
+                resetBtn.disabled = false;
+
+            } catch (error) {
+                console.error("Error loading data:", error);
+                alert("Error loading data. Check console for details.");
+            } finally {
+                loadBtn.disabled = false;
+                loadBtn.innerText = "Load Data";
+            }
+        });
+
+        // 2. PLAY SEQUENCE
+        async function playSequence() {
+            if (sortedPhases.length === 0 || currentPhaseIndex >= sortedPhases.length) return;
+
+            // Ghost all objects on the very first play click
+            if (!isGhosted) {
+                await ghostAllObjects();
+                isGhosted = true;
+            }
+
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+
+            const speedMs = parseFloat(speedSlider.value) * 1000;
+
+            // Execute first step immediately, then start interval
+            await processNextPhase();
+            
+            playbackInterval = setInterval(async () => {
+                await processNextPhase();
+            }, speedMs);
         }
 
+        async function processNextPhase() {
+            if (currentPhaseIndex >= sortedPhases.length) {
+                pauseSequence();
+                statusDisplay.innerText = "Sequence Complete";
+                return;
+            }
+
+            const currentPhase = sortedPhases[currentPhaseIndex];
+            const objectIdsForPhase = phaseGroups[currentPhase];
+            
+            statusDisplay.innerText = `Current Phase: ${currentPhase}`;
+            
+            await unhideObjects(objectIdsForPhase);
+            currentPhaseIndex++;
+        }
+
+        // 3. PAUSE SEQUENCE
         function pauseSequence() {
-            isPlaying = false;
-            clearInterval(sequenceInterval);
-            document.getElementById('btn-play').disabled = false;
-            document.getElementById('btn-pause').disabled = true;
-            
-            if (currentStepIndex > 0) {
-                document.getElementById('status').innerText = `Status: Paused at Order ${sequenceSteps[currentStepIndex-1]}`;
+            if (playbackInterval) {
+                clearInterval(playbackInterval);
+                playbackInterval = null;
             }
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
         }
 
-        function resetSequence() {
+        // 4. RESET SEQUENCE
+        async function resetSequence() {
             pauseSequence();
-            currentStepIndex = 0;
-            updateViewerForStep(0);
-        }
-
-        function jumpToStep(step) {
-            currentStepIndex = parseInt(step);
-            updateViewerForStep(currentStepIndex);
-            if (isPlaying) pauseSequence();
-        }
-
-        // 3. COLOR LOGIC & VIEWER INTERACTION
-        function updateViewerForStep(stepIndex) {
-            document.getElementById('step-slider').value = stepIndex;
+            currentPhaseIndex = 0;
+            isGhosted = false;
+            statusDisplay.innerText = sortedPhases.length > 0 ? "Ready" : "Current Phase: --";
             
-            const completedIds = []; 
-            const currentIds = [];   
-            const pendingIds = [];   
-            
-            // Map the current slider step to the actual ORDER parameter value
-            const currentOrder = stepIndex === 0 ? 0 : sequenceSteps[stepIndex - 1];
-            
-            modelObjects.forEach(obj => {
-                if (stepIndex === 0) {
-                    // Step 0: Nothing has started, everything is grey
-                    pendingIds.push(obj.id);
-                } else if (obj.ORDER < currentOrder) {
-                    completedIds.push(obj.id); // Finished -> Green
-                } else if (obj.ORDER === currentOrder) {
-                    currentIds.push(obj.id);   // Active -> Yellow
-                } else {
-                    pendingIds.push(obj.id);   // Future -> Grey
-                }
-            });
-
-            if (stepIndex === 0) {
-                document.getElementById('status').innerText = "Status: Site Empty (Step 0) - All greyed out.";
-            } else {
-                document.getElementById('status').innerText = `Building Step ${stepIndex} (Order: ${currentOrder})`;
+            if (workspace && allObjectIds.length > 0) {
+                /* 
+                 * =========================================================
+                 * ADJUSTMENT REQUIRED HERE: Reset all objects to original colors.
+                 * E.g., workspace.viewer.resetColors(allObjectIds);
+                 * =========================================================
+                 */
+                console.log("Resetting all objects to original states.");
+                // await workspace.viewer.resetColors();
             }
-            
-            applyColorsToViewer(completedIds, currentIds, pendingIds);
         }
 
-        function applyColorsToViewer(completedIds, currentIds, pendingIds) {
-            // ACTION: Replace this block with actual Trimble Workspace API calls.
-            // A typical implementation using the Workspace API viewer colors looks like this:
+        // EVENT LISTENERS
+        playBtn.addEventListener('click', playSequence);
+        pauseBtn.addEventListener('click', pauseSequence);
+        resetBtn.addEventListener('click', resetSequence);
+
+        // API HELPER: Ghost Objects
+        async function ghostAllObjects() {
+            /* 
+             * =========================================================
+             * ADJUSTMENT REQUIRED HERE: 
+             * Use the exact method from the Trimble API to change colors/opacity.
+             * You may need to pass the modelId alongside the object IDs.
+             * =========================================================
+             */
+            console.log("Ghosting all objects:", allObjectIds);
             
-            /*
-            WorkspaceAPI.viewer.setColors([
-                ...completedIds.map(id => ({ objectId: id, color: "#00FF00" })), // Green
-                ...currentIds.map(id => ({ objectId: id, color: "#FFFF00" })),   // Yellow
-                ...pendingIds.map(id => ({ objectId: id, color: "#808080" }))    // Grey
-            ]);
-            */
-            
-            console.log(`VIEWER API: Colored ${completedIds.length} Green, ${currentIds.length} Yellow, ${pendingIds.length} Grey`);
+            // Example of what the API call might look like:
+            // await workspace.viewer.setColors(allObjectIds, {
+            //     color: { r: 200, g: 200, b: 200 },
+            //     opacity: 0.2
+            // });
         }
 
-        window.onload = initializeModelData;
+        // API HELPER: Unhide Objects
+        async function unhideObjects(objectIds) {
+            /* 
+             * =========================================================
+             * ADJUSTMENT REQUIRED HERE:
+             * Restore the specific array of IDs to their original state.
+             * Some viewer APIs allow clearing color overrides by passing null,
+             * or you might need a specific `resetColors(objectIds)` method.
+             * =========================================================
+             */
+            console.log("Unhiding objects for current phase:", objectIds);
+            
+            // Example of what the API call might look like:
+            // await workspace.viewer.resetColors(objectIds); 
+            // OR
+            // await workspace.viewer.setColors(objectIds, { opacity: 1.0 });
+        }
+
+        // Bootstrap on load
+        window.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
