@@ -20,7 +20,8 @@
       --accent: #1a8cff;
       --accent-2: #0ea5e9;
       --good: #22c55e;
-      --warn: #f59e0b;
+      --warn: #facc15;
+      --pending: #94a3b8;
       --danger: #ef4444;
       --shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
       --radius: 12px;
@@ -134,8 +135,46 @@
     .phase-value {
       font-size: 28px;
       font-weight: 750;
-      color: #7dd3fc;
+      color: var(--pending);
     }
+
+    .phase-value.is-pending { color: var(--pending); }
+    .phase-value.is-active { color: var(--warn); }
+    .phase-value.is-completed { color: #4ade80; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      margin-top: 12px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .swatch.is-pending { background: #bec4cc; opacity: 0.7; }
+    .swatch.is-active { background: var(--warn); }
+    .swatch.is-completed { background: #22c55e; }
+
+    #phaseCard[data-state="pending"] { border-color: #3d4d5f; }
+    #phaseCard[data-state="active"] { border-color: rgba(250, 204, 21, 0.55); }
+    #phaseCard[data-state="completed"] { border-color: rgba(34, 197, 94, 0.55); }
+
+    #playbackStatus.is-pending { color: var(--pending); }
+    #playbackStatus.is-active { color: var(--warn); }
+    #playbackStatus.is-completed { color: #86efac; }
 
     .meta {
       margin-top: 10px;
@@ -178,8 +217,16 @@
       display: block;
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, var(--accent-2), #22c55e);
-      transition: width 0.2s ease;
+      background: var(--pending);
+      transition: width 0.2s ease, background 0.2s ease;
+    }
+
+    .progress.is-active > span {
+      background: linear-gradient(90deg, var(--warn), #22c55e);
+    }
+
+    .progress.is-completed > span {
+      background: #22c55e;
     }
   </style>
 </head>
@@ -199,15 +246,20 @@
       <div id="loadMeta" class="meta">Connect to the viewer, then load objects grouped by the parameter above.</div>
     </section>
 
-    <section class="card">
+    <section class="card" id="phaseCard" data-state="pending">
       <div class="phase-box">
         <div>
           <label>Current Phase</label>
-          <div class="phase-value" id="currentPhase">—</div>
+          <div class="phase-value is-pending" id="currentPhase">—</div>
         </div>
-        <div class="status" id="playbackStatus">Idle</div>
+        <div class="status is-pending" id="playbackStatus">Idle</div>
       </div>
-      <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
+      <div class="progress is-pending" id="progressTrack" aria-hidden="true"><span id="progressBar"></span></div>
+      <div class="legend">
+        <span class="legend-item"><span class="swatch is-pending"></span> Pending (grey)</span>
+        <span class="legend-item"><span class="swatch is-active"></span> In progress (yellow)</span>
+        <span class="legend-item"><span class="swatch is-completed"></span> Done (green)</span>
+      </div>
     </section>
 
     <section class="card">
@@ -236,8 +288,9 @@
     /**
      * 4D Construction Sequence Simulator
      * ---------------------------------
-     * Groups 3D objects by a named property (default: "ORDER"), ghosts the
-     * whole model, then restores objects phase-by-phase to simulate construction.
+     * Groups 3D objects by a named property (default: "ORDER"), ghosts pending
+     * orders in grey, highlights the active order in yellow, then marks
+     * completed orders green.
      */
 
     // ----- DOM -----
@@ -253,6 +306,8 @@
     const statusEl = document.getElementById("status");
     const playbackStatus = document.getElementById("playbackStatus");
     const progressBar = document.getElementById("progressBar");
+    const progressTrack = document.getElementById("progressTrack");
+    const phaseCard = document.getElementById("phaseCard");
 
     // ----- Runtime state -----
     let workspace = null;
@@ -263,14 +318,20 @@
     let intervalId = null;
     let hasGhosted = false;
     let isPlaying = false;
+    /** @type {"pending" | "active" | "completed"} */
+    let executionState = "pending";
 
-    const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 }; // light grey, ~20% alpha (0–255)
+    const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 }; // pending / grey, ~20% alpha
     const GHOST_OPACITY = 0.2;
-    const SOLID_COLOR = { r: 46, g: 125, b: 246, a: 255 }; // opaque if original color is unknown
+    const ACTIVE_COLOR = { r: 250, g: 204, b: 21, a: 255 }; // in progress / yellow
+    const COMPLETED_COLOR = { r: 34, g: 197, b: 94, a: 255 }; // done / green
+    const EXECUTION_APPEARANCE = {
+      pending: { visible: true, opacity: GHOST_OPACITY, color: GHOST_COLOR },
+      active: { visible: true, opacity: 1, color: ACTIVE_COLOR },
+      completed: { visible: true, opacity: 1, color: COMPLETED_COLOR }
+    };
     const PROPERTY_BATCH_SIZE = 200;
     const STATE_BATCH_SIZE = 250;
-    /** @type {Map<string, string | {r:number,g:number,b:number,a:number}>} */
-    const originalColors = new Map();
     /** @type {Set<string>} */
     const matchedPropertyNames = new Set();
 
@@ -279,8 +340,17 @@
       statusEl.className = "status" + (kind ? " " + kind : "");
     }
 
-    function setPlaybackStatus(message) {
+    function setPlaybackStatus(message, state) {
       playbackStatus.textContent = message;
+      if (state) setExecutionUi(state);
+    }
+
+    function setExecutionUi(state) {
+      executionState = state;
+      currentPhaseEl.className = "phase-value is-" + state;
+      playbackStatus.className = "status is-" + state;
+      progressTrack.className = "progress is-" + state;
+      phaseCard.setAttribute("data-state", state);
     }
 
     function updateSpeedLabel() {
@@ -289,19 +359,18 @@
     }
 
     function updatePhaseUi() {
-      if (!sortedPhases.length) {
+      if (!sortedPhases.length || currentIndex <= 0) {
         currentPhaseEl.textContent = "—";
         progressBar.style.width = "0%";
+        if (executionState !== "completed") setExecutionUi("pending");
         return;
       }
-      if (currentIndex <= 0) {
-        currentPhaseEl.textContent = "—";
-        progressBar.style.width = "0%";
-        return;
-      }
-      const phase = sortedPhases[currentIndex - 1];
-      currentPhaseEl.textContent = String(phase.key);
-      progressBar.style.width = ((currentIndex / sortedPhases.length) * 100).toFixed(1) + "%";
+      const activeOrLast = sortedPhases[Math.min(currentIndex, sortedPhases.length) - 1];
+      currentPhaseEl.textContent = String(activeOrLast.key);
+      const ratio = executionState === "completed"
+        ? 1
+        : currentIndex / sortedPhases.length;
+      progressBar.style.width = (ratio * 100).toFixed(1) + "%";
     }
 
     function setControlsEnabled(loaded) {
@@ -546,10 +615,6 @@
         .filter((id) => id != null);
     }
 
-    function colorKey(modelId, runtimeId) {
-      return modelId + ":" + runtimeId;
-    }
-
     async function loadData() {
       if (!viewer) {
         setStatus("Connecting to the 3D Viewer…");
@@ -584,7 +649,6 @@
           throw new Error("No objects were returned. Load a 3D model in the viewer first.");
         }
 
-        originalColors.clear();
         matchedPropertyNames.clear();
         matchedPropertyNames.add(parameterName);
 
@@ -614,7 +678,6 @@
             if (!match) continue;
             matched += 1;
             if (match.name) matchedPropertyNames.add(match.name);
-            if (props.color) originalColors.set(colorKey(modelId, runtimeId), props.color);
 
             if (!grouped.has(match.value)) grouped.set(match.value, new Map());
             const perModel = grouped.get(match.value);
@@ -654,7 +717,8 @@
         currentIndex = 0;
         updatePhaseUi();
         setControlsEnabled(true);
-        setPlaybackStatus("Ready");
+        setPlaybackStatus("Ready", "pending");
+        setExecutionUi("pending");
         setStatus("Data loaded. Press Play to start the sequence.", "ok");
       } catch (err) {
         console.error(err);
@@ -665,31 +729,19 @@
     }
 
     /**
-     * COLOR / OPACITY
-     * ---------------
+     * COLOR / OPACITY BY EXECUTION STATE
+     * ----------------------------------
+     * pending   → ghost grey, 20% opacity (not started)
+     * active    → opaque yellow (order currently executing)
+     * completed → opaque green (finished; stays green)
+     *
      * Working SDK samples pass a flat selector:
      *   { modelId, objectRuntimeIds }
      * Official ObjectSelector wraps that as:
      *   { modelObjectIds: [{ modelId, objectRuntimeIds }] }
-     * Ghosting with `undefined` works. Revealing with only the wrapped form
-     * often matches nothing, so objects stay ghosted while the UI still ticks.
-     *
-     * Do not rely on color: "reset" for the sequence — it frequently leaves
-     * the previous ghost color in place. Reveal with an opaque color instead.
      */
     async function applyState(selector, objectState) {
       await viewer.setObjectState(selector, objectState);
-    }
-
-    function revealStateForIds(modelId, ids) {
-      const firstColor = ids
-        .map((id) => originalColors.get(colorKey(modelId, id)))
-        .find(Boolean);
-      return {
-        visible: true,
-        opacity: 1,
-        color: firstColor || SOLID_COLOR
-      };
     }
 
     async function applyStateToIds(modelId, ids, objectState) {
@@ -698,12 +750,10 @@
 
       for (let i = 0; i < objectRuntimeIds.length; i += STATE_BATCH_SIZE) {
         const batch = objectRuntimeIds.slice(i, i + STATE_BATCH_SIZE);
-        // Format used by Trimble samples / setSelection / setCamera
         await applyState(
           { modelId: modelId, objectRuntimeIds: batch, recursive: true },
           objectState
         );
-        // Official ObjectSelector shape
         await applyState(
           { modelObjectIds: [{ modelId: modelId, objectRuntimeIds: batch, recursive: true }] },
           objectState
@@ -732,31 +782,19 @@
       }
     }
 
-    async function ghostEntireModel() {
-      await applyState(undefined, {
-        color: GHOST_COLOR,
-        opacity: GHOST_OPACITY,
-        visible: true
-      });
-      hasGhosted = true;
-    }
-
-    async function restorePhase(phase) {
+    async function applyPhaseAppearance(phase, stateName) {
+      const objectState = EXECUTION_APPEARANCE[stateName];
       const parameterName = parameterInput.value.trim() || "ORDER";
       for (const group of phase.byModel) {
-        const state = revealStateForIds(group.modelId, group.objectRuntimeIds);
-        await applyStateToIds(group.modelId, group.objectRuntimeIds, state);
+        await applyStateToIds(group.modelId, group.objectRuntimeIds, objectState);
       }
-      await applyStateByParameter(parameterName, phase.key, {
-        visible: true,
-        opacity: 1,
-        color: SOLID_COLOR
-      });
+      await applyStateByParameter(parameterName, phase.key, objectState);
     }
 
-    async function restoreAllObjects() {
-      await applyState(undefined, { color: "reset", opacity: 1, visible: "reset" });
-      hasGhosted = false;
+    async function ghostEntireModel() {
+      await applyState(undefined, EXECUTION_APPEARANCE.pending);
+      hasGhosted = true;
+      setExecutionUi("pending");
     }
 
     function stopPlaybackTimer() {
@@ -781,24 +819,34 @@
     }
 
     async function stepOnce() {
-      if (currentIndex >= sortedPhases.length) {
-        stopInterval();
-        setPlaybackStatus("Complete");
-        setStatus("Sequence finished. Reset to play again.", "ok");
-        return;
-      }
-
-      const phase = sortedPhases[currentIndex];
-      const objectCount = phase.byModel.reduce(
-        (sum, group) => sum + (group.objectRuntimeIds ? group.objectRuntimeIds.length : 0),
-        0
-      );
-      setStatus("Revealing ORDER " + phase.key + " (" + objectCount + " objects)…");
       try {
-        await restorePhase(phase);
+        if (currentIndex > 0) {
+          const previous = sortedPhases[currentIndex - 1];
+          await applyPhaseAppearance(previous, "completed");
+        }
+
+        if (currentIndex >= sortedPhases.length) {
+          stopInterval();
+          setPlaybackStatus("Complete", "completed");
+          progressBar.style.width = "100%";
+          if (sortedPhases.length) {
+            currentPhaseEl.textContent = String(sortedPhases[sortedPhases.length - 1].key);
+          }
+          setStatus("Sequence finished. All orders are green. Reset to play again.", "ok");
+          return;
+        }
+
+        const phase = sortedPhases[currentIndex];
+        const objectCount = phase.byModel.reduce(
+          (sum, group) => sum + (group.objectRuntimeIds ? group.objectRuntimeIds.length : 0),
+          0
+        );
+        setStatus("ORDER " + phase.key + " in progress (" + objectCount + " objects)…");
+        await applyPhaseAppearance(phase, "active");
         currentIndex += 1;
+        setExecutionUi("active");
         updatePhaseUi();
-        setPlaybackStatus("Playing");
+        setPlaybackStatus("Playing", "active");
       } catch (err) {
         console.error(err);
         stopInterval();
@@ -812,28 +860,31 @@
 
       playBtn.disabled = true;
       try {
-        if (currentIndex >= sortedPhases.length) {
-          await restoreAllObjects();
+        if (currentIndex >= sortedPhases.length || executionState === "completed") {
           currentIndex = 0;
+          setExecutionUi("pending");
           updatePhaseUi();
+          hasGhosted = false;
         }
 
         if (!hasGhosted) {
-          setStatus("Ghosting the model…");
+          setStatus("Ghosting pending orders…");
           await ghostEntireModel();
         }
 
         isPlaying = true;
         pauseBtn.disabled = false;
         resetBtn.disabled = false;
-        setPlaybackStatus("Playing");
+        setPlaybackStatus("Playing", "active");
         setStatus("Playing construction sequence.", "ok");
 
         await stepOnce();
-        while (isPlaying && currentIndex < sortedPhases.length) {
+        while (isPlaying) {
           await waitForSpeed();
           if (!isPlaying) break;
+          const finishing = currentIndex >= sortedPhases.length;
           await stepOnce();
+          if (finishing || !isPlaying) break;
         }
       } catch (err) {
         console.error(err);
@@ -846,19 +897,19 @@
 
     function pause() {
       stopInterval();
-      setPlaybackStatus("Paused");
+      setPlaybackStatus("Paused", executionState);
       setStatus("Paused at phase " + (currentPhaseEl.textContent || "—") + ".");
     }
 
     async function reset() {
       stopInterval();
       currentIndex = 0;
-      updatePhaseUi();
-      setPlaybackStatus("Resetting");
+      setPlaybackStatus("Resetting", "pending");
       try {
-        await restoreAllObjects();
-        setPlaybackStatus("Ready");
-        setStatus("Model restored to original colors.", "ok");
+        await ghostEntireModel();
+        updatePhaseUi();
+        setPlaybackStatus("Ready", "pending");
+        setStatus("All orders are pending (grey). Press Play to start.", "ok");
       } catch (err) {
         console.error(err);
         setStatus("Reset failed: " + err.message, "error");
