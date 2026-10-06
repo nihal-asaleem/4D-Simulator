@@ -173,7 +173,6 @@
 
     <div class="form-group">
         <label for="paramName">Parameter Name (Grouping Property)</label>
-        <!-- Updated default value to 'Sequence' -->
         <input type="text" id="paramName" value="Sequence">
     </div>
 
@@ -219,7 +218,6 @@
         
         getProperties: async (objectIds, propertyName) => {
             // TODO: Implement actual API call to fetch properties for given object IDs
-            // The logic below assumes this returns an array: [{ objectId: "...", value: "..." }]
             console.log(`ViewerAPI: Getting property '${propertyName}' for ${objectIds.length} objects`);
             return []; 
         },
@@ -237,12 +235,12 @@
 
     // --- APPLICATION STATE ---
     const State = {
-        sequenceData: [], // Array of { orderValue: number, objectIds: string[] }
+        sequenceData: [], 
         currentIndex: 0,
         isPlaying: false,
         intervalId: null,
         hasGhosted: false,
-        allObjectIds: [] // Stores all IDs to apply the initial ghost state
+        allObjectIds: [] 
     };
 
     // --- UI ELEMENTS ---
@@ -260,7 +258,6 @@
     // --- EVENT LISTENERS ---
     UI.speedSlider.addEventListener('input', (e) => {
         UI.speedValue.textContent = parseFloat(e.target.value).toFixed(1) + 's';
-        // If playing, restart the interval with the new speed
         if (State.isPlaying) {
             pauseSimulation();
             playSimulation();
@@ -292,17 +289,45 @@
             // 3. Group Object IDs dynamically by their parameter value
             const groupedMap = new Map();
 
-            // Actual dynamic parsing logic applied here
+            // Robust dynamic parsing logic for nested property sets
             rawProperties.forEach(item => {
-                // Parse the value to a number for accurate chronological sorting
-                const val = parseFloat(item.value); 
-                
-                // Group all object IDs that share the same Sequence value
-                if (!isNaN(val)) {
-                    if (!groupedMap.has(val)) {
-                        groupedMap.set(val, []);
+                let targetValue = null;
+
+                // Check if the API returned a 'properties' array for this object
+                if (item.properties && Array.isArray(item.properties)) {
+                    
+                    // Loop through all Property Sets (e.g., "Default", "Construction Sequence")
+                    item.properties.forEach(propSet => {
+                        
+                        // If the set has nested properties, search inside it
+                        if (propSet.properties && Array.isArray(propSet.properties)) {
+                            const found = propSet.properties.find(p => p.name === paramName);
+                            if (found) targetValue = found.value;
+                        } 
+                        // Fallback just in case it's a flat structure
+                        else if (propSet.name === paramName) {
+                            targetValue = propSet.value;
+                        }
+                    });
+                } else if (item.value !== undefined) {
+                    // Fallback if the root object directly has a value property (flat structure)
+                    targetValue = item.value;
+                }
+
+                // If we found the value, parse it and group the object
+                if (targetValue !== null && targetValue !== undefined) {
+                    const val = parseFloat(targetValue); 
+                    
+                    if (!isNaN(val)) {
+                        if (!groupedMap.has(val)) {
+                            groupedMap.set(val, []);
+                        }
+                        // Support various ID keys based on exact SDK response structure
+                        const objId = item.id || item.objectId || item.guid;
+                        if (objId) {
+                            groupedMap.get(val).push(objId); 
+                        }
                     }
-                    groupedMap.get(val).push(item.objectId);
                 }
             });
 
@@ -339,7 +364,6 @@
         
         // Initial State (Pending): Ghost all objects before the tool starts
         if (!State.hasGhosted && State.currentIndex === 0) {
-            // Apply Grey Ghost color (Light grey, 20% opacity)
             await ViewerAPI.setColors(State.allObjectIds, "#d3d3d3", 0.2);
             State.hasGhosted = true;
         }
@@ -376,10 +400,9 @@
     }
 
     async function executeStep() {
-        // Stop if we reached the end
         if (State.currentIndex >= State.sequenceData.length) {
             pauseSimulation();
-            UI.btnPlay.disabled = true; // Disable play since it's finished
+            UI.btnPlay.disabled = true; 
             UI.statusDisplay.textContent = "Simulation Complete!";
             return;
         }
@@ -392,11 +415,11 @@
         // 2. State transition: If there was a previous step, mark it as Completed (Green)
         if (State.currentIndex > 0) {
             const previousStep = State.sequenceData[State.currentIndex - 1];
-            await ViewerAPI.setColors(previousStep.objectIds, "#2ecc71", 1.0); // Solid Green
+            await ViewerAPI.setColors(previousStep.objectIds, "#2ecc71", 1.0); 
         }
 
         // 3. State transition: Mark current step as Active (Yellow)
-        await ViewerAPI.setColors(currentStep.objectIds, "#f1c40f", 1.0); // Solid Yellow
+        await ViewerAPI.setColors(currentStep.objectIds, "#f1c40f", 1.0); 
 
         // Increment for next interval tick
         State.currentIndex++;
