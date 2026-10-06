@@ -250,10 +250,11 @@
     let hasGhosted = false;
     let isPlaying = false;
 
-    const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 };
+    // Use Hex format for Custom Colors to ensure proper rendering across viewer versions
+    const GHOST_COLOR = { r: 190, g: 196, b: 204, a: 51 }; 
     const GHOST_OPACITY = 0.2;
-    const ACTIVE_COLOR = { r: 253, g: 224, b: 71, a: 255 };
-    const COMPLETED_COLOR = { r: 34, g: 197, b: 94, a: 255 };
+    const ACTIVE_COLOR = "#FDE047";     // Yellow Hex
+    const COMPLETED_COLOR = "#22C55E";  // Green Hex
     const PROPERTY_BATCH_SIZE = 200;
 
     function setStatus(message, kind = "") {
@@ -602,11 +603,11 @@
       hasGhosted = true;
     }
 
-    async function setPhaseState(phase, colorRGBA) {
+    async function setPhaseState(phase, colorValue) {
       for (const group of phase.byModel) {
         await applyState(
           { modelObjectIds: [{ modelId: group.modelId, objectRuntimeIds: group.objectRuntimeIds }] },
-          { color: colorRGBA, opacity: 1 }
+          { color: colorValue, opacity: 1 }
         );
       }
     }
