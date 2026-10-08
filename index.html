@@ -178,8 +178,8 @@
         return foundValue;
     }
 
-    // 3. Apply Colors via Trimble Workspace API `setObjectState`
-    async function applyColorToElements(items, r, g, b, a) {
+    // 3. Apply Visibility via Trimble API
+    async function applyVisibilityToElements(items, isVisible) {
         if (!items || items.length === 0 || !tcAPI) return;
         
         const models = {};
@@ -197,10 +197,9 @@
         }
         
         try {
-            // Workspace API specifically uses setObjectState for color overrides
-            await tcAPI.viewer.setObjectState(selectorArray, { color: { r, g, b, a } });
+            await tcAPI.viewer.setVisibility(selectorArray, isVisible);
         } catch (e) {
-            console.error("Failed to set colors. Check API version", e);
+            console.error("Failed to set visibility", e);
         }
     }
 
@@ -210,8 +209,8 @@
         pauseSimulation();
         currentIndex = 0;
         
-        // Ghost all elements: Grey with 20% opacity (0.2 alpha)
-        applyColorToElements(globalSortedResults, 128, 128, 128, 0.2);
+        // Hide ALL elements in the list to start the simulation
+        applyVisibilityToElements(globalSortedResults, false);
 
         // Reset UI list highlighting
         globalSortedResults.forEach(item => {
@@ -238,27 +237,21 @@
     }
 
     function stepSimulation() {
-        // 1. Turn PREVIOUS element Green (Done)
-        if (currentIndex > 0) {
-            const prevItem = globalSortedResults[currentIndex - 1];
-            applyColorToElements([prevItem], 0, 255, 0, 1.0); 
-            
-            const prevEl = document.getElementById(`item-${prevItem.id}`);
-            if (prevEl) prevEl.style.backgroundColor = '#d4edda'; // UI Light Green
-        }
-        
-        // 2. Turn CURRENT element Yellow (Active)
         if (currentIndex < globalSortedResults.length) {
             const currItem = globalSortedResults[currentIndex];
-            applyColorToElements([currItem], 255, 255, 0, 1.0); 
             
+            // Make the current element visible
+            applyVisibilityToElements([currItem], true); 
+            
+            // Highlight it in the UI list
             const currEl = document.getElementById(`item-${currItem.id}`);
             if (currEl) {
-                currEl.style.backgroundColor = '#fff3cd'; // UI Light Yellow
+                currEl.style.backgroundColor = '#d4edda'; // UI Light Green
                 currEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
             currentIndex++;
         } else {
+            // Reached the end
             pauseSimulation();
         }
     }
@@ -290,12 +283,12 @@
         resultBox.innerText = "Fetching and sorting data...";
         
         pauseSimulation();
-        globalSortedResults = [];
         
-        // 1. Reset any previously applied custom colors back to default materials
-        try { 
-            await tcAPI.viewer.setObjectState(undefined, { color: "reset" });
-        } catch(e) {}
+        // If there were old elements, make sure they are visible again before fetching new ones
+        if (globalSortedResults.length > 0) {
+            await applyVisibilityToElements(globalSortedResults, true);
+        }
+        globalSortedResults = [];
 
         try {
             const selection = await tcAPI.viewer.getSelection();
@@ -320,6 +313,7 @@
                 }
             }
 
+            // Sort ascending based on value
             resultsArray.sort((a, b) => {
                 const valA = a.value, valB = b.value;
                 if (valA == null) return 1;
@@ -340,17 +334,12 @@
                 }
             });
 
-            // 2. Clear viewer selection specifically using the "set" mode on an empty array
-            try { 
-                await tcAPI.viewer.setSelection([], "set"); 
-            } catch(e) {
-                console.error("Selection clearing failed:", e);
-            }
+            // Clear viewer selection so elements don't stay highlighted
+            try { await tcAPI.viewer.setSelection([], "set"); } catch(e) {}
 
-            // 3. Initialize the visual ghosting
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
-                resetSimulation(); 
+                resetSimulation(); // This immediately hides all valid sorted elements
             } else {
                 document.getElementById('sim-controls').style.display = "none";
                 resultBox.innerHTML += `<br><em>No valid data to simulate.</em>`;
