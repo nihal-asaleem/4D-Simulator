@@ -54,7 +54,7 @@
 
     <div class="form-group">
         <label for="paramName">Parameter Name</label>
-        <input type="text" id="paramName" value="Sequence">
+        <input type="text" id="paramName" value="ORDER">
     </div>
 
     <div class="form-group" style="margin-top: 16px;">
@@ -112,15 +112,11 @@
     async function initTrimbleAPI() {
         if (viewerAPI) return true;
         try {
-            // First check if script tag loaded it globally
             let API = window.WorkspaceAPI;
-            
-            // If not, try loading dynamically using an ES Module
             if (!API) {
                 const module = await import('https://esm.sh/trimble-connect-workspace-api');
                 API = module.default || module.WorkspaceAPI || module;
             }
-
             if (!API) throw new Error("Could not resolve WorkspaceAPI");
 
             workspaceAPI = await API.connect(window.parent, (event, args) => {});
@@ -156,19 +152,32 @@
 
     // --- CORE LOGIC ---
 
-    // Recursive search to guarantee we find the property in deep IFC folders
-    function findPropertyValueRecursively(propertiesArray, targetName) {
-        if (!propertiesArray || !Array.isArray(propertiesArray)) return null;
+    // Deep search scanning the entire properties object, ignoring case sensitivity
+    function deepSearchProperty(obj, targetName) {
+        if (!obj) return null;
 
-        for (const prop of propertiesArray) {
-            if (prop.name === targetName && prop.value !== undefined) {
-                return prop.value;
+        // If it's an array, scan every item
+        if (Array.isArray(obj)) {
+            for (let item of obj) {
+                let res = deepSearchProperty(item, targetName);
+                if (res !== null) return res;
             }
-            if (prop.properties && Array.isArray(prop.properties)) {
-                const nestedResult = findPropertyValueRecursively(prop.properties, targetName);
-                if (nestedResult !== null) return nestedResult;
+            return null;
+        }
+
+        // If it's an object, check keys
+        if (typeof obj === 'object') {
+            // Check if this object is the property itself
+            if (obj.name && String(obj.name).trim().toLowerCase() === String(targetName).trim().toLowerCase() && obj.value !== undefined) {
+                return obj.value;
+            }
+            // Otherwise keep digging
+            for (let key in obj) {
+                let res = deepSearchProperty(obj[key], targetName);
+                if (res !== null) return res;
             }
         }
+        
         return null;
     }
 
@@ -180,47 +189,49 @@
         try {
             UI.statusDisplay.textContent = "Step 2/3: Fetching model objects...";
             
-            // Fetch SELECTED objects first. If none are selected, fetch ALL objects.
+            // Fetch selected objects, or default to all objects
             let modelEntities = await viewerAPI.getObjects({ selected: true });
-            
             let totalSelected = modelEntities ? modelEntities.reduce((acc, m) => acc + (m.objectRuntimeIds?.length || 0), 0) : 0;
+            
             if (totalSelected === 0) {
                 modelEntities = await viewerAPI.getObjects();
             }
 
-            UI.statusDisplay.textContent = `Step 3/3: Parsing parameters...`;
+            if (!modelEntities || modelEntities.length === 0) {
+                UI.statusDisplay.textContent = "No objects found in model.";
+                return false;
+            }
+
+            State.allObjects = modelEntities;
+
+            UI.statusDisplay.textContent = `Step 3/3: Scanning parameters...`;
+            
+            // IMPORTANT FIX: getObjectProperties correctly takes the modelEntities array
+            const propertiesList = await viewerAPI.getObjectProperties(modelEntities);
             const groupedMap = new Map();
-            State.allObjects = [];
 
-            for (const entity of modelEntities) {
-                const modelId = entity.modelId;
-                const runtimeIds = entity.objectRuntimeIds;
+            // Iterate over the property data returned by the API
+            for (const objProps of propertiesList) {
+                // Use the ultra-robust scanner to find the paramName
+                const targetValue = deepSearchProperty(objProps, paramName);
 
-                if (!runtimeIds || runtimeIds.length === 0) continue;
-                
-                State.allObjects.push({ modelId: modelId, objectRuntimeIds: runtimeIds });
-
-                const propertiesList = await viewerAPI.getObjectProperties(modelId, runtimeIds);
-                
-                propertiesList.forEach(objProps => {
-                    const targetValue = findPropertyValueRecursively(objProps.properties, paramName);
-
-                    if (targetValue !== null && targetValue !== undefined) {
-                        const val = parseFloat(targetValue); 
-                        if (!isNaN(val)) {
-                            if (!groupedMap.has(val)) groupedMap.set(val, []);
-                            
-                            groupedMap.get(val).push({
-                                modelId: modelId,
-                                objectRuntimeId: objProps.objectRuntimeId
-                            });
-                        }
+                if (targetValue !== null && targetValue !== undefined) {
+                    const val = parseFloat(targetValue); 
+                    if (!isNaN(val)) {
+                        if (!groupedMap.has(val)) groupedMap.set(val, []);
+                        
+                        // Push the id into the mapped group
+                        groupedMap.get(val).push({
+                            modelId: objProps.modelId,
+                            objectRuntimeId: objProps.objectRuntimeId
+                        });
                     }
-                });
+                }
             }
 
             State.sequenceData = Array.from(groupedMap.entries())
                 .map(([orderValue, objects]) => {
+                    // Group back by modelId
                     const modelMap = new Map();
                     objects.forEach(obj => {
                         if (!modelMap.has(obj.modelId)) modelMap.set(obj.modelId, []);
@@ -266,7 +277,7 @@
         UI.btnPause.disabled = true;
         UI.btnReset.disabled = true;
 
-        // Fetch data if it hasn't been fetched yet
+        // Fetch data if necessary
         if (State.sequenceData.length === 0 || State.lastParamName !== paramName) {
             const success = await fetchSequenceData(paramName);
             if (!success) {
@@ -310,7 +321,6 @@
         
         if (viewerAPI) {
             try {
-                // Clear colors by applying an empty object state to all tracked objects
                 const selector = { modelObjectIds: State.allObjects };
                 await viewerAPI.setObjectState(selector, { color: undefined });
             } catch (err) {
