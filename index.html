@@ -96,14 +96,21 @@
         return foundValue;
     }
 
-    // 3. Clear Viewer Selection Safely
+    // 3. Forcefully Clear Viewer Selection 
     async function clearSelectionRobustly() {
         if (!tcAPI) return;
         try {
-            // A simple empty array drops the active selection natively
-            await tcAPI.viewer.setSelection([]);
-            // Crucial: Wait 250ms for the viewer to update and drop the yellow lines before hiding
-            await new Promise(resolve => setTimeout(resolve, 250));
+            // The "set" mode is absolutely mandatory here to override existing selections
+            await tcAPI.viewer.setSelection([], "set");
+            
+            if (globalSortedResults.length > 0) {
+                const uniqueModels = [...new Set(globalSortedResults.map(item => item.modelId))];
+                const clearReq = uniqueModels.map(m => ({ modelId: m, objectRuntimeIds: [] }));
+                await tcAPI.viewer.setSelection(clearReq, "set");
+            }
+            
+            // Allow the viewer a fraction of a second to render the deselection before hiding
+            await new Promise(resolve => setTimeout(resolve, 200));
         } catch (e) { 
             console.error("Failed to clear selection:", e); 
         }
@@ -127,7 +134,7 @@
         try {
             if (!isVisible) {
                 // Hide: Completely transparent
-                await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 0, g: 0, b: 0, a: 0.0 } });
+                await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 128, g: 128, b: 128, a: 0.0 } });
             } else {
                 // Show: Solid Green to track simulation clearly
                 await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 40, g: 167, b: 69, a: 1.0 } });
@@ -143,7 +150,7 @@
         pauseSimulation();
         currentIndex = 0;
 
-        // Force deselection to drop the yellow bounding boxes
+        // Force deselection so the yellow outlines drop
         await clearSelectionRobustly();
         
         // Hide ALL valid elements to prepare for simulation
@@ -183,7 +190,7 @@
             }
             currentIndex++;
         } else {
-            pauseSimulation(); // Stop when done
+            pauseSimulation(); 
         }
     }
 
@@ -251,7 +258,6 @@
 
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
-                // Trigger the initial hide for all sorted elements immediately
                 resetSimulation(); 
             } else {
                 document.getElementById('sim-controls').style.display = "none";
