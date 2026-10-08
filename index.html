@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>4D Construction Sequence Simulator</title>
-    <!-- Primary Script Attempt -->
+    <!-- Include Trimble Connect Workspace API -->
     <script src="https://unpkg.com/trimble-connect-workspace-api@latest/dist/index.js"></script>
     
     <style>
@@ -152,50 +152,34 @@
 
     // --- CORE LOGIC ---
 
-    // Deep search scanning the entire properties object, ignoring case sensitivity
-    function deepSearchProperty(obj, targetName) {
-        if (!obj) return null;
+    // Case-insensitive recursive search to find properties hidden in sets like 'Construction Sequence'
+    function findPropertyValue(propertiesArray, targetName) {
+        if (!propertiesArray || !Array.isArray(propertiesArray)) return null;
 
-        // If it's an array, scan every item
-        if (Array.isArray(obj)) {
-            for (let item of obj) {
-                let res = deepSearchProperty(item, targetName);
-                if (res !== null) return res;
+        for (const prop of propertiesArray) {
+            // Check if this is the target property (case-insensitive)
+            if (prop.name && String(prop.name).trim().toLowerCase() === String(targetName).trim().toLowerCase() && prop.value !== undefined) {
+                return prop.value;
             }
-            return null;
-        }
-
-        // If it's an object, check keys
-        if (typeof obj === 'object') {
-            // Check if this object is the property itself
-            if (obj.name && String(obj.name).trim().toLowerCase() === String(targetName).trim().toLowerCase() && obj.value !== undefined) {
-                return obj.value;
-            }
-            // Otherwise keep digging
-            for (let key in obj) {
-                let res = deepSearchProperty(obj[key], targetName);
-                if (res !== null) return res;
+            // Check if this is a Property Set (like "Construction Sequence") with nested properties
+            if (prop.properties && Array.isArray(prop.properties)) {
+                const nestedResult = findPropertyValue(prop.properties, targetName);
+                if (nestedResult !== null) return nestedResult;
             }
         }
-        
         return null;
     }
 
     async function fetchSequenceData(paramName) {
-        UI.statusDisplay.textContent = "Step 1/3: Connecting to API...";
+        UI.statusDisplay.textContent = "Connecting to API...";
         const isConnected = await initTrimbleAPI();
         if (!isConnected) return false;
 
         try {
-            UI.statusDisplay.textContent = "Step 2/3: Fetching model objects...";
+            UI.statusDisplay.textContent = "Scanning full model...";
             
-            // Fetch selected objects, or default to all objects
-            let modelEntities = await viewerAPI.getObjects({ selected: true });
-            let totalSelected = modelEntities ? modelEntities.reduce((acc, m) => acc + (m.objectRuntimeIds?.length || 0), 0) : 0;
-            
-            if (totalSelected === 0) {
-                modelEntities = await viewerAPI.getObjects();
-            }
+            // IMPORTANT FIX 1: Omitting { selected: true } to guarantee it scans the entire building
+            let modelEntities = await viewerAPI.getObjects();
 
             if (!modelEntities || modelEntities.length === 0) {
                 UI.statusDisplay.textContent = "No objects found in model.";
@@ -203,35 +187,41 @@
             }
 
             State.allObjects = modelEntities;
-
-            UI.statusDisplay.textContent = `Step 3/3: Scanning parameters...`;
-            
-            // IMPORTANT FIX: getObjectProperties correctly takes the modelEntities array
-            const propertiesList = await viewerAPI.getObjectProperties(modelEntities);
             const groupedMap = new Map();
+            let objectsFound = 0;
 
-            // Iterate over the property data returned by the API
-            for (const objProps of propertiesList) {
-                // Use the ultra-robust scanner to find the paramName
-                const targetValue = deepSearchProperty(objProps, paramName);
+            // Loop through all loaded models (usually just 1 for a single IFC)
+            for (const entity of modelEntities) {
+                const modelId = entity.modelId;
+                const runtimeIds = entity.objectRuntimeIds;
 
-                if (targetValue !== null && targetValue !== undefined) {
-                    const val = parseFloat(targetValue); 
-                    if (!isNaN(val)) {
-                        if (!groupedMap.has(val)) groupedMap.set(val, []);
-                        
-                        // Push the id into the mapped group
-                        groupedMap.get(val).push({
-                            modelId: objProps.modelId,
-                            objectRuntimeId: objProps.objectRuntimeId
-                        });
+                if (!runtimeIds || runtimeIds.length === 0) continue;
+
+                // IMPORTANT FIX 2: Correct API Signature (modelId, runtimeIds)
+                const propertiesList = await viewerAPI.getObjectProperties(modelId, runtimeIds);
+                
+                // propertiesList contains property data for every assembly
+                for (const objProps of propertiesList) {
+                    const targetValue = findPropertyValue(objProps.properties, paramName);
+
+                    if (targetValue !== null && targetValue !== undefined) {
+                        const val = parseFloat(targetValue); 
+                        if (!isNaN(val)) {
+                            if (!groupedMap.has(val)) groupedMap.set(val, []);
+                            
+                            groupedMap.get(val).push({
+                                modelId: objProps.modelId,
+                                objectRuntimeId: objProps.objectRuntimeId
+                            });
+                            objectsFound++;
+                        }
                     }
                 }
             }
 
+            // Grouping and ordering sequentially
             State.sequenceData = Array.from(groupedMap.entries())
                 .map(([orderValue, objects]) => {
-                    // Group back by modelId
                     const modelMap = new Map();
                     objects.forEach(obj => {
                         if (!modelMap.has(obj.modelId)) modelMap.set(obj.modelId, []);
@@ -245,7 +235,7 @@
 
                     return { orderValue, mappedEntities: mappedIds };
                 })
-                .sort((a, b) => a.orderValue - b.orderValue);
+                .sort((a, b) => a.orderValue - b.orderValue); // Sort numerically
 
             if (State.sequenceData.length === 0) {
                 UI.statusDisplay.textContent = `No objects found with parameter: ${paramName}`;
@@ -257,7 +247,7 @@
 
         } catch (error) {
             console.error("Error extracting properties:", error);
-            UI.statusDisplay.textContent = "Error scanning model.";
+            UI.statusDisplay.textContent = "Error scanning model. Check console.";
             return false;
         }
     }
@@ -277,7 +267,7 @@
         UI.btnPause.disabled = true;
         UI.btnReset.disabled = true;
 
-        // Fetch data if necessary
+        // Fetch property data if necessary
         if (State.sequenceData.length === 0 || State.lastParamName !== paramName) {
             const success = await fetchSequenceData(paramName);
             if (!success) {
@@ -287,9 +277,9 @@
             }
         }
 
-        // Apply Grey Ghost State (Semi-transparent)
+        // State 1: Apply Grey Ghost State (Pending)
         if (!State.hasGhosted && State.currentIndex === 0) {
-            UI.statusDisplay.textContent = "Applying ghost state...";
+            UI.statusDisplay.textContent = "Ghosting model...";
             await applyColor(State.allObjects, "#d3d3d3", 50); 
             State.hasGhosted = true;
         }
@@ -300,7 +290,7 @@
 
         const speedMs = parseFloat(UI.speedSlider.value) * 1000;
         
-        // Execute first step and start interval
+        // Execute the first step instantly and start the loop
         executeStep();
         State.intervalId = setInterval(executeStep, speedMs);
     }
@@ -321,6 +311,7 @@
         
         if (viewerAPI) {
             try {
+                // Remove color overrides by passing undefined
                 const selector = { modelObjectIds: State.allObjects };
                 await viewerAPI.setObjectState(selector, { color: undefined });
             } catch (err) {
@@ -345,13 +336,13 @@
         const currentStep = State.sequenceData[State.currentIndex];
         UI.statusDisplay.textContent = `Current Sequence: ${currentStep.orderValue}`;
 
-        // Complete Previous Step (Solid Green)
+        // State 3: Complete Previous Step (Solid Green)
         if (State.currentIndex > 0) {
             const previousStep = State.sequenceData[State.currentIndex - 1];
             await applyColor(previousStep.mappedEntities, "#2ecc71", 255); 
         }
 
-        // Highlight Active Step (Solid Yellow)
+        // State 2: Highlight Active Step (Solid Yellow)
         await applyColor(currentStep.mappedEntities, "#f1c40f", 255); 
 
         State.currentIndex++;
