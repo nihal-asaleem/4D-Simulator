@@ -53,6 +53,7 @@
             min-height: 40px;
             max-height: 200px;
             overflow-y: auto;
+            scroll-behavior: smooth;
         }
         .status {
             font-size: 12px;
@@ -61,19 +62,19 @@
         }
         .result-item {
             margin-bottom: 8px;
-            padding-bottom: 8px;
+            padding: 8px;
             border-bottom: 1px solid #ddd;
-            transition: background-color 0.3s;
+            transition: background-color 0.2s;
+            border-radius: 4px;
         }
         .result-item:last-child {
             border-bottom: none;
             margin-bottom: 0;
-            padding-bottom: 0;
         }
 
         /* Simulation Controls Styles */
         #sim-controls {
-            display: none; /* Hidden until data is loaded */
+            display: none; 
             margin-top: 15px;
             padding-top: 15px;
             border-top: 1px solid #ccc;
@@ -119,8 +120,8 @@
 
     <!-- Simulation Controls -->
     <div id="sim-controls">
-        <label>Playback Speed: <span id="speed-val">1.0</span>s / step</label>
-        <input type="range" id="sim-speed" min="0.5" max="3" step="0.1" value="1">
+        <label>Playback Speed: <span id="speed-val">0.5</span>s / step</label>
+        <input type="range" id="sim-speed" min="0.1" max="3" step="0.1" value="0.5">
         
         <div class="sim-btn-group">
             <button id="btn-play" class="sim-btn">Play</button>
@@ -134,26 +135,24 @@
     import * as WorkspaceAPI from 'https://esm.sh/trimble-connect-workspace-api';
 
     let tcAPI = null;
-    let globalSortedResults = []; // Stores the sorted element data
-    
-    // Simulation variables
+    let globalSortedResults = []; 
     let simInterval = null;
     let currentIndex = 0;
 
-    // 1. Connect to the parent Trimble Connect window
+    // 1. Connect to API
     async function initExtension() {
         try {
             tcAPI = await WorkspaceAPI.connect(window.parent, (event, args) => {});
             document.getElementById('status-text').innerText = "✅ API Connected";
             document.getElementById('status-text').style.color = "green";
         } catch (error) {
-            console.error("Failed to connect to Trimble Connect", error);
+            console.error("Connection Failed", error);
             document.getElementById('status-text').innerText = "❌ Connection Failed";
             document.getElementById('status-text').style.color = "red";
         }
     }
 
-    // 2. Recursive Search for Parameter
+    // 2. Recursive Search
     function findParameterValue(propertiesData, paramName) {
         let foundValue = null;
         const targetName = paramName.toLowerCase();
@@ -161,12 +160,10 @@
         const searchObj = (obj) => {
             if (foundValue !== null) return;
             if (typeof obj !== 'object' || obj === null) return;
-
             if (obj.name && String(obj.name).toLowerCase() === targetName && obj.value !== undefined) {
                 foundValue = obj.value;
                 return;
             }
-
             for (const key in obj) {
                 if (key.toLowerCase() === targetName) {
                     foundValue = obj[key];
@@ -177,16 +174,14 @@
                 }
             }
         };
-
         searchObj(propertiesData);
         return foundValue;
     }
 
-    // 3. Apply Colors to Elements via Trimble Connect API
+    // 3. Apply Colors via Trimble API
     async function applyColorToElements(items, r, g, b, a) {
         if (!items || items.length === 0 || !tcAPI) return;
         
-        // Group object IDs by Model ID (required by the API structure)
         const models = {};
         items.forEach(item => {
             if (!models[item.modelId]) models[item.modelId] = [];
@@ -215,22 +210,24 @@
         pauseSimulation();
         currentIndex = 0;
         
-        // Ghost all elements: Grey color with 20% opacity (0.2 alpha)
+        // Ghost all elements: Grey with 20% opacity
         applyColorToElements(globalSortedResults, 128, 128, 128, 0.2);
+
+        // Reset UI list highlighting
+        globalSortedResults.forEach(item => {
+            const el = document.getElementById(`item-${item.id}`);
+            if (el) el.style.backgroundColor = 'transparent';
+        });
+        
+        document.getElementById('result-box').scrollTop = 0;
     }
 
     function playSimulation() {
-        if (simInterval || globalSortedResults.length === 0) return; // Prevent double-triggering
+        if (simInterval || globalSortedResults.length === 0) return;
         
         const speedMs = parseFloat(document.getElementById('sim-speed').value) * 1000;
-        
-        // Execute steps based on the slider timing
-        simInterval = setInterval(() => {
-            stepSimulation();
-        }, speedMs);
-        
-        // Immediately trigger the first step so there's no delay
-        stepSimulation();
+        simInterval = setInterval(() => { stepSimulation(); }, speedMs);
+        stepSimulation(); // Trigger first step immediately
     }
 
     function pauseSimulation() {
@@ -241,31 +238,36 @@
     }
 
     function stepSimulation() {
-        // 1. Turn the PREVIOUS element Green (finished)
+        // 1. Turn PREVIOUS element Green (Done)
         if (currentIndex > 0) {
             const prevItem = globalSortedResults[currentIndex - 1];
-            applyColorToElements([prevItem], 0, 255, 0, 1.0); // Solid Green
+            applyColorToElements([prevItem], 0, 255, 0, 1.0); 
+            
+            const prevEl = document.getElementById(`item-${prevItem.id}`);
+            if (prevEl) prevEl.style.backgroundColor = '#d4edda'; // UI Light Green
         }
         
-        // 2. Turn the CURRENT element Yellow (active)
+        // 2. Turn CURRENT element Yellow (Active)
         if (currentIndex < globalSortedResults.length) {
             const currItem = globalSortedResults[currentIndex];
-            applyColorToElements([currItem], 255, 255, 0, 1.0); // Solid Yellow
+            applyColorToElements([currItem], 255, 255, 0, 1.0); 
+            
+            const currEl = document.getElementById(`item-${currItem.id}`);
+            if (currEl) {
+                currEl.style.backgroundColor = '#fff3cd'; // UI Light Yellow
+                currEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
             currentIndex++;
         } else {
-            // Reached the end: pause interval (the last item turned green in the block above)
             pauseSimulation();
         }
     }
 
-    // --- EVENT LISTENERS ---
-
-    // Slider UI updater
+    // --- LISTENERS ---
     document.getElementById('sim-speed').addEventListener('input', function() {
         document.getElementById('speed-val').innerText = parseFloat(this.value).toFixed(1);
     });
 
-    // If speed is changed while playing, restart the interval seamlessly
     document.getElementById('sim-speed').addEventListener('change', function() {
         if (simInterval) {
             pauseSimulation();
@@ -273,86 +275,58 @@
         }
     });
 
-    // Button controls
     document.getElementById('btn-play').addEventListener('click', playSimulation);
     document.getElementById('btn-pause').addEventListener('click', pauseSimulation);
     document.getElementById('btn-reset').addEventListener('click', resetSimulation);
 
-    // Main Fetch & Sort Button
     document.getElementById('getValueBtn').addEventListener('click', async () => {
         const resultBox = document.getElementById('result-box');
-        
-        if (!tcAPI) {
-            resultBox.innerText = "Error: API not connected.";
-            return;
-        }
+        if (!tcAPI) { resultBox.innerText = "Error: API not connected."; return; }
 
         const paramName = document.getElementById('paramName').value.trim();
-        if (!paramName) {
-            resultBox.innerText = "Please type a parameter name.";
-            return;
-        }
+        if (!paramName) { resultBox.innerText = "Please type a parameter name."; return; }
 
         resultBox.innerText = "Fetching and sorting data...";
         
-        // Reset old simulation state and clear any existing colors before running a new search
         pauseSimulation();
         globalSortedResults = [];
-        try {
-            if(tcAPI.viewer.resetColors) await tcAPI.viewer.resetColors();
-        } catch(e) { /* Ignore if not supported */ }
+        
+        try { if(tcAPI.viewer.resetColors) await tcAPI.viewer.resetColors(); } catch(e) {}
 
         try {
             const selection = await tcAPI.viewer.getSelection();
-            
             if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
-                resultBox.innerText = "No objects selected. Please click elements in the 3D viewer.";
+                resultBox.innerText = "No objects selected.";
                 document.getElementById('sim-controls').style.display = "none";
                 return;
             }
 
             let resultsArray = [];
 
-            // Loop through selected models
             for (const sel of selection) {
                 const modelId = sel.modelId;
-                
                 if (sel.objectRuntimeIds && sel.objectRuntimeIds.length > 0) {
                     const propertiesList = await tcAPI.viewer.getObjectProperties(modelId, sel.objectRuntimeIds);
-                    
                     if (propertiesList && propertiesList.length > 0) {
                         propertiesList.forEach((objectData, index) => {
                             const value = findParameterValue(objectData, paramName);
-                            const elementId = sel.objectRuntimeIds[index];
-
-                            // Store modelId for the color API
-                            resultsArray.push({ modelId: modelId, id: elementId, value: value });
+                            resultsArray.push({ modelId: modelId, id: sel.objectRuntimeIds[index], value: value });
                         });
                     }
                 }
             }
 
-            // Sort ascending
             resultsArray.sort((a, b) => {
-                const valA = a.value;
-                const valB = b.value;
-
-                if (valA === null || valA === undefined) return 1;
-                if (valB === null || valB === undefined) return -1;
-
-                const numA = Number(valA);
-                const numB = Number(valB);
-
-                if (!isNaN(numA) && !isNaN(numB)) {
-                    return numA - numB;
-                }
+                const valA = a.value, valB = b.value;
+                if (valA == null) return 1;
+                if (valB == null) return -1;
+                const numA = Number(valA), numB = Number(valB);
+                if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
                 return String(valA).localeCompare(String(valB));
             });
 
-            // Save globally for the simulator (exclude items where value was not found)
             globalSortedResults = resultsArray.filter(item => item.value !== null && item.value !== undefined);
 
-            // Render HTML
             resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
             resultsArray.forEach(item => {
                 if (item.value !== null && item.value !== undefined) {
@@ -362,7 +336,9 @@
                 }
             });
 
-            // Show Simulation Panel and initialize the Ghosting effect
+            // CLEAR SELECTION: Vital for custom colors to be visible over the selection highlight!
+            try { await tcAPI.viewer.setSelection([]); } catch(e) {}
+
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
                 resetSimulation(); 
@@ -373,7 +349,7 @@
 
         } catch (error) {
             console.error("API Error:", error);
-            resultBox.innerText = "Error fetching properties. Check the developer console.";
+            resultBox.innerText = "Error fetching properties.";
         }
     });
 
