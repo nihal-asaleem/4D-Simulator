@@ -3,363 +3,184 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>4D Construction Sequence Simulator</title>
-    <!-- Include Trimble Connect Workspace API -->
-    <script src="https://unpkg.com/trimble-connect-workspace-api@latest/dist/index.js"></script>
-    
+    <title>Trimble Connect Parameter Viewer</title>
     <style>
-        :root {
-            --primary: #005F9E;
-            --primary-hover: #004b7d;
-            --bg-color: #f4f7f9;
-            --card-bg: #ffffff;
-            --text-main: #333333;
-            --text-muted: #666666;
-            --border-color: #e0e0e0;
-            --ghost-color: #d3d3d3;
-            --active-color: #f1c40f;
-            --completed-color: #2ecc71;
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 15px;
+            background-color: #f9f9f9;
+            color: #333;
         }
-
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 16px; font-size: 14px; }
-        .container { background-color: var(--card-bg); border-radius: 8px; padding: 16px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color); }
-        .header { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color); }
-        .header h2 { margin: 0 0 4px 0; font-size: 16px; color: var(--primary); }
-        .header p { margin: 0; font-size: 12px; color: var(--text-muted); }
-        .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 6px; font-weight: 600; }
-        .form-group input[type="text"] { width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; box-sizing: border-box; font-size: 14px; }
-        .slider-container { display: flex; align-items: center; gap: 12px; }
-        .slider-container input[type="range"] { flex-grow: 1; }
-        .slider-value { min-width: 45px; text-align: right; font-weight: bold; }
-        .btn { background-color: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: background-color 0.2s; font-size: 14px; width: 100%; flex-grow: 1; }
-        .btn:hover { background-color: var(--primary-hover); }
-        .btn:disabled { background-color: #a0c4db; cursor: not-allowed; }
-        .btn-secondary { background-color: #ecf0f1; color: var(--text-main); border: 1px solid var(--border-color); }
-        .btn-secondary:hover { background-color: #d5dbdb; }
-        .controls { display: flex; gap: 8px; margin-bottom: 16px; }
-        .status-panel { background-color: #f8f9fa; border: 1px solid var(--border-color); border-radius: 4px; padding: 12px; text-align: center; font-size: 14px; font-weight: bold; }
-        .legend { display: flex; justify-content: space-between; margin-top: 16px; font-size: 11px; color: var(--text-muted); }
-        .legend-item { display: flex; align-items: center; gap: 4px; }
-        .color-box { width: 12px; height: 12px; border-radius: 2px; border: 1px solid #ccc; }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 300px;
+        }
+        label {
+            font-size: 14px;
+            font-weight: 600;
+            display: block;
+            margin-bottom: 5px;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #005F9E;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover {
+            background-color: #004573;
+        }
+        #result-box {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f1f1f1;
+            border-left: 4px solid #005F9E;
+            word-break: break-all;
+            min-height: 20px;
+        }
+        .status {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="header">
-        <h2>4D Sequence Simulator</h2>
-        <p>Visualize construction progression over time.</p>
-    </div>
-
-    <div class="form-group">
-        <label for="paramName">Parameter Name</label>
-        <input type="text" id="paramName" value="ORDER">
-    </div>
-
-    <div class="form-group" style="margin-top: 16px;">
-        <label for="speedSlider">Playback Speed (Seconds per step)</label>
-        <div class="slider-container">
-            <input type="range" id="speedSlider" min="0.5" max="3" step="0.1" value="1">
-            <span id="speedValue" class="slider-value">1.0s</span>
-        </div>
-    </div>
-
-    <div class="controls">
-        <button id="btnPlay" class="btn">Play</button>
-        <button id="btnPause" class="btn btn-secondary" disabled>Pause</button>
-        <button id="btnReset" class="btn btn-secondary" disabled>Reset</button>
-    </div>
-
-    <div class="status-panel" id="statusDisplay">
-        Ready to start
-    </div>
-
-    <div class="legend">
-        <div class="legend-item"><div class="color-box" style="background-color: var(--ghost-color);"></div> Pending</div>
-        <div class="legend-item"><div class="color-box" style="background-color: var(--active-color);"></div> Active</div>
-        <div class="legend-item"><div class="color-box" style="background-color: var(--completed-color);"></div> Done</div>
-    </div>
+    <div class="status" id="status-text">Connecting to Trimble Connect...</div>
+    
+    <label for="paramName">IFC Parameter Name:</label>
+    <input type="text" id="paramName" placeholder="e.g. Volume, Reference, etc.">
+    
+    <button id="getValueBtn">Get Parameter Value</button>
+    
+    <div id="result-box">Select an element and search...</div>
 </div>
 
+<!-- Using esm.sh to load the Workspace API natively in the browser -->
 <script type="module">
-    let viewerAPI = null;
-    let workspaceAPI = null;
+    import * as WorkspaceAPI from 'https://esm.sh/trimble-connect-workspace-api';
 
-    const State = {
-        sequenceData: [], 
-        currentIndex: 0,
-        isPlaying: false,
-        intervalId: null,
-        hasGhosted: false,
-        allObjects: [],
-        lastParamName: "" 
-    };
+    let tcAPI = null;
 
-    const UI = {
-        paramName: document.getElementById('paramName'),
-        btnPlay: document.getElementById('btnPlay'),
-        btnPause: document.getElementById('btnPause'),
-        btnReset: document.getElementById('btnReset'),
-        speedSlider: document.getElementById('speedSlider'),
-        speedValue: document.getElementById('speedValue'),
-        statusDisplay: document.getElementById('statusDisplay')
-    };
-
-    // Safely Initialize API Connection
-    async function initTrimbleAPI() {
-        if (viewerAPI) return true;
+    // 1. Connect to the parent Trimble Connect window
+    async function initExtension() {
         try {
-            let API = window.WorkspaceAPI;
-            if (!API) {
-                const module = await import('https://esm.sh/trimble-connect-workspace-api');
-                API = module.default || module.WorkspaceAPI || module;
-            }
-            if (!API) throw new Error("Could not resolve WorkspaceAPI");
-
-            workspaceAPI = await API.connect(window.parent, (event, args) => {});
-            viewerAPI = workspaceAPI.viewer;
-            return true;
-        } catch (err) {
-            console.error("Trimble API Error:", err);
-            UI.statusDisplay.textContent = "API Error. Check console.";
-            return false;
-        }
-    }
-
-    function hexToRgba(hex, alpha = 255) {
-        const r = parseInt(hex.slice(1, 3), 16);
-        const g = parseInt(hex.slice(3, 5), 16);
-        const b = parseInt(hex.slice(5, 7), 16);
-        return { r, g, b, a: alpha }; 
-    }
-
-    UI.speedSlider.addEventListener('input', (e) => {
-        UI.speedValue.textContent = parseFloat(e.target.value).toFixed(1) + 's';
-        if (State.isPlaying) {
-            pauseSimulation();
-            playSimulation();
-        }
-    });
-
-    UI.btnPlay.addEventListener('click', playSimulation);
-    UI.btnPause.addEventListener('click', pauseSimulation);
-    UI.btnReset.addEventListener('click', resetSimulation);
-
-    // Ultra-Robust Deep Search: Scans every branch of the property JSON, case-insensitive
-    function extractPropertyValues(objProps, targetName) {
-        let results = [];
-        const lowerTarget = String(targetName).trim().toLowerCase();
-
-        function search(obj) {
-            if (!obj) return;
-            if (Array.isArray(obj)) {
-                obj.forEach(search);
-                return;
-            }
-            if (typeof obj === 'object') {
-                if (obj.name !== undefined && String(obj.name).trim().toLowerCase() === lowerTarget) {
-                    let val = obj.value !== undefined ? obj.value : (obj.displayValue !== undefined ? obj.displayValue : null);
-                    if (val !== null) results.push(val);
-                }
-                for (let key in obj) {
-                    if (String(key).trim().toLowerCase() === lowerTarget) {
-                        if (typeof obj[key] === 'string' || typeof obj[key] === 'number') {
-                            results.push(obj[key]);
-                        }
-                    }
-                    if (typeof obj[key] === 'object') {
-                        search(obj[key]);
-                    }
-                }
-            }
-        }
-        search(objProps);
-        return results;
-    }
-
-    async function fetchSequenceData(paramName) {
-        UI.statusDisplay.textContent = "Connecting to API...";
-        const isConnected = await initTrimbleAPI();
-        if (!isConnected) return false;
-
-        try {
-            UI.statusDisplay.textContent = "Fetching object IDs...";
-            
-            let modelEntities = await viewerAPI.getObjects();
-            if (!modelEntities || modelEntities.length === 0) {
-                UI.statusDisplay.textContent = "No objects found in model.";
-                return false;
-            }
-
-            State.allObjects = modelEntities;
-            const groupedMap = new Map();
-            let objectsFound = 0;
-
-            for (const entity of modelEntities) {
-                const modelId = entity.modelId;
-                const runtimeIds = entity.objectRuntimeIds;
-
-                if (!runtimeIds || runtimeIds.length === 0) continue;
-
-                // FIX: Chunking to prevent API Payload timeouts
-                const chunkSize = 500; 
-                
-                for (let i = 0; i < runtimeIds.length; i += chunkSize) {
-                    const chunk = runtimeIds.slice(i, i + chunkSize);
-                    
-                    // Show progress in the UI
-                    UI.statusDisplay.textContent = `Scanning chunk ${i} to ${Math.min(i + chunkSize, runtimeIds.length)}...`;
-                    
-                    try {
-                        const propertiesList = await viewerAPI.getObjectProperties(modelId, chunk);
-                        
-                        if (propertiesList) {
-                            for (const objProps of propertiesList) {
-                                // Extract any value associated with the property name
-                                const values = extractPropertyValues(objProps, paramName);
-                                
-                                for (let v of values) {
-                                    const parsed = parseFloat(v);
-                                    if (!isNaN(parsed)) {
-                                        if (!groupedMap.has(parsed)) groupedMap.set(parsed, []);
-                                        
-                                        groupedMap.get(parsed).push({
-                                            modelId: objProps.modelId,
-                                            objectRuntimeId: objProps.objectRuntimeId
-                                        });
-                                        objectsFound++;
-                                        break; // Found valid sequence number, skip other properties
-                                    }
-                                }
-                            }
-                        }
-                    } catch (chunkErr) {
-                        console.warn(`Failed to fetch properties for chunk ${i}`, chunkErr);
-                    }
-                }
-            }
-
-            State.sequenceData = Array.from(groupedMap.entries())
-                .map(([orderValue, objects]) => {
-                    const modelMap = new Map();
-                    objects.forEach(obj => {
-                        if (!modelMap.has(obj.modelId)) modelMap.set(obj.modelId, []);
-                        modelMap.get(obj.modelId).push(obj.objectRuntimeId);
-                    });
-
-                    const mappedIds = Array.from(modelMap.entries()).map(([mId, rIds]) => ({
-                        modelId: mId,
-                        objectRuntimeIds: rIds
-                    }));
-
-                    return { orderValue, mappedEntities: mappedIds };
-                })
-                .sort((a, b) => a.orderValue - b.orderValue);
-
-            if (State.sequenceData.length === 0) {
-                UI.statusDisplay.textContent = `No objects found with parameter: ${paramName}`;
-                return false;
-            }
-
-            UI.statusDisplay.textContent = `Found ${objectsFound} objects. Ready.`;
-            State.lastParamName = paramName;
-            return true;
-
+            tcAPI = await WorkspaceAPI.connect(window.parent, (event, args) => {
+                // Event listener for parent window interactions (optional)
+            });
+            document.getElementById('status-text').innerText = "✅ API Connected";
+            document.getElementById('status-text').style.color = "green";
         } catch (error) {
-            console.error("Error extracting properties:", error);
-            UI.statusDisplay.textContent = "Error scanning model. Check console.";
-            return false;
+            console.error("Failed to connect to Trimble Connect", error);
+            document.getElementById('status-text').innerText = "❌ Connection Failed";
+            document.getElementById('status-text').style.color = "red";
         }
     }
 
-    async function applyColor(modelEntities, hexColor, opacityAlpha = 255) {
-        if (!viewerAPI || !modelEntities || modelEntities.length === 0) return;
-        const selector = { modelObjectIds: modelEntities };
-        const objectState = { color: hexToRgba(hexColor, opacityAlpha) };
-        await viewerAPI.setObjectState(selector, objectState);
-    }
+    // 2. Recursive function to find the parameter inside deep IFC Property Sets
+    function findParameterValue(propertiesData, paramName) {
+        let foundValue = null;
+        const targetName = paramName.toLowerCase();
 
-    async function playSimulation() {
-        const paramName = UI.paramName.value.trim();
-        if (!paramName) return alert("Please enter a parameter name.");
+        const searchObj = (obj) => {
+            if (foundValue !== null) return;
+            if (typeof obj !== 'object' || obj === null) return;
 
-        UI.btnPlay.disabled = true;
-        UI.btnPause.disabled = true;
-        UI.btnReset.disabled = true;
-
-        if (State.sequenceData.length === 0 || State.lastParamName !== paramName) {
-            const success = await fetchSequenceData(paramName);
-            if (!success) {
-                UI.btnPlay.disabled = false;
-                UI.btnReset.disabled = false;
+            // Handle array-based {name: "Volume", value: 10} formats
+            if (obj.name && String(obj.name).toLowerCase() === targetName && obj.value !== undefined) {
+                foundValue = obj.value;
                 return;
             }
-        }
 
-        if (!State.hasGhosted && State.currentIndex === 0) {
-            UI.statusDisplay.textContent = "Ghosting model...";
-            await applyColor(State.allObjects, "#d3d3d3", 50); 
-            State.hasGhosted = true;
-        }
-
-        State.isPlaying = true;
-        UI.btnPause.disabled = false;
-        UI.btnReset.disabled = false;
-
-        const speedMs = parseFloat(UI.speedSlider.value) * 1000;
-        executeStep();
-        State.intervalId = setInterval(executeStep, speedMs);
-    }
-
-    function pauseSimulation() {
-        State.isPlaying = false;
-        clearInterval(State.intervalId);
-        UI.btnPlay.disabled = false;
-        UI.btnPause.disabled = true;
-    }
-
-    async function resetSimulation() {
-        pauseSimulation();
-        State.currentIndex = 0;
-        State.hasGhosted = false;
-        State.sequenceData = []; 
-        State.lastParamName = "";
-        
-        if (viewerAPI) {
-            try {
-                const selector = { modelObjectIds: State.allObjects };
-                await viewerAPI.setObjectState(selector, { color: undefined });
-            } catch (err) {
-                console.warn("Could not reset colors", err);
+            // Handle direct Key-Value pair formats
+            for (const key in obj) {
+                if (key.toLowerCase() === targetName) {
+                    foundValue = obj[key];
+                    return;
+                }
+                if (typeof obj[key] === 'object') {
+                    searchObj(obj[key]);
+                }
             }
-        }
-        
-        UI.statusDisplay.textContent = "Ready to start";
-        UI.btnPlay.disabled = false;
-        UI.btnPause.disabled = true;
-        UI.btnReset.disabled = true;
+        };
+
+        searchObj(propertiesData);
+        return foundValue;
     }
 
-    async function executeStep() {
-        if (State.currentIndex >= State.sequenceData.length) {
-            pauseSimulation();
-            UI.btnPlay.disabled = true; 
-            UI.statusDisplay.textContent = "Simulation Complete!";
+    // 3. Handle Button Click
+    document.getElementById('getValueBtn').addEventListener('click', async () => {
+        const resultBox = document.getElementById('result-box');
+        
+        if (!tcAPI) {
+            resultBox.innerText = "Error: API not connected.";
             return;
         }
 
-        const currentStep = State.sequenceData[State.currentIndex];
-        UI.statusDisplay.textContent = `Current Sequence: ${currentStep.orderValue}`;
-
-        if (State.currentIndex > 0) {
-            const previousStep = State.sequenceData[State.currentIndex - 1];
-            await applyColor(previousStep.mappedEntities, "#2ecc71", 255); 
+        const paramName = document.getElementById('paramName').value.trim();
+        if (!paramName) {
+            resultBox.innerText = "Please type a parameter name.";
+            return;
         }
 
-        await applyColor(currentStep.mappedEntities, "#f1c40f", 255); 
-        State.currentIndex++;
-    }
+        resultBox.innerText = "Fetching data...";
+
+        try {
+            // Get selected objects from the 3D Viewer
+            const selection = await tcAPI.viewer.getSelection();
+            
+            if (!selection || selection.length === 0 || selection[0].objectRuntimeIds.length === 0) {
+                resultBox.innerText = "No objects selected. Please click an element in the 3D viewer.";
+                return;
+            }
+
+            // Extract the Model ID and Object ID of the first selected element
+            const modelId = selection[0].modelId;
+            const objectRuntimeId = selection[0].objectRuntimeIds[0];
+
+            // Request the full property data for that specific element
+            const properties = await tcAPI.viewer.getObjectProperties(modelId, [objectRuntimeId]);
+            
+            if (properties && properties.length > 0) {
+                const objectData = properties[0];
+                
+                // Search for the parameter 
+                const value = findParameterValue(objectData, paramName);
+
+                if (value !== null && value !== undefined) {
+                    resultBox.innerHTML = `<strong>${paramName}:</strong> <br>${value}`;
+                } else {
+                    resultBox.innerText = `Parameter "${paramName}" not found on this element.`;
+                }
+            } else {
+                resultBox.innerText = "No properties found for this element.";
+            }
+
+        } catch (error) {
+            console.error("API Error:", error);
+            resultBox.innerText = "Error fetching properties. Check the developer console.";
+        }
+    });
+
+    // Initialize as soon as the DOM loads
+    window.onload = initExtension;
 </script>
 
 </body>
