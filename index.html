@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trimble Connect Parameter Simulator</title>
+    <title>Trimble Connect Parameter Viewer</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -22,17 +22,34 @@
         input[type="text"] { width: 100%; padding: 8px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         .btn-main { width: 100%; padding: 10px; background-color: #005F9E; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
         .btn-main:hover { background-color: #004573; }
-        #result-box { margin-top: 15px; padding: 10px; background-color: #f1f1f1; border-left: 4px solid #005F9E; word-break: break-all; min-height: 40px; max-height: 200px; overflow-y: auto; scroll-behavior: smooth; }
+        #result-box { 
+            margin-top: 15px; 
+            padding: 10px; 
+            background-color: #f1f1f1; 
+            border-left: 4px solid #005F9E; 
+            word-break: break-all; 
+            min-height: 40px; 
+            max-height: 350px; 
+            overflow-y: auto; 
+            scroll-behavior: smooth; 
+        }
         .status { font-size: 12px; color: #666; margin-bottom: 10px; }
-        .result-item { margin-bottom: 8px; padding: 8px; border-bottom: 1px solid #ddd; transition: background-color 0.2s; border-radius: 4px; }
+        .result-item { 
+            margin-bottom: 8px; 
+            padding: 8px; 
+            border-bottom: 1px solid #ddd; 
+            transition: background-color 0.2s, transform 0.1s; 
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .result-item:hover {
+            background-color: #e2e6ea;
+        }
+        .result-item:active {
+            transform: scale(0.98);
+        }
         .result-item:last-child { border-bottom: none; margin-bottom: 0; }
-        #sim-controls { display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #ccc; }
-        .sim-btn-group { display: flex; gap: 5px; margin-top: 10px; }
-        .sim-btn { flex: 1; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; }
-        #btn-play { background-color: #28a745; } #btn-play:hover { background-color: #218838; }
-        #btn-pause { background-color: #ffc107; color: #333; } #btn-pause:hover { background-color: #e0a800; }
-        #btn-reset { background-color: #dc3545; } #btn-reset:hover { background-color: #c82333; }
-        input[type="range"] { width: 100%; margin-top: 5px; }
+        .help-text { font-size: 11px; color: #555; margin-top: 10px; font-style: italic; display: none; }
     </style>
 </head>
 <body>
@@ -42,18 +59,8 @@
     <label for="paramName">IFC Parameter Name:</label>
     <input type="text" id="paramName" placeholder="e.g. Volume, Reference, etc.">
     <button id="getValueBtn" class="btn-main">Get & Sort Parameter</button>
+    <div class="help-text" id="help-text">Click on any item below to highlight it in the 3D model.</div>
     <div id="result-box">Select elements and search...</div>
-
-    <!-- Simulation Controls -->
-    <div id="sim-controls">
-        <label>Playback Speed: <span id="speed-val">0.5</span>s / step</label>
-        <input type="range" id="sim-speed" min="0.1" max="3" step="0.1" value="0.5">
-        <div class="sim-btn-group">
-            <button id="btn-play" class="sim-btn">Play</button>
-            <button id="btn-pause" class="sim-btn">Pause</button>
-            <button id="btn-reset" class="sim-btn">Reset</button>
-        </div>
-    </div>
 </div>
 
 <script type="module">
@@ -61,8 +68,6 @@
 
     let tcAPI = null;
     let globalSortedResults = []; 
-    let simInterval = null;
-    let currentIndex = 0;
 
     // 1. Connect to API
     async function initExtension() {
@@ -77,7 +82,7 @@
         }
     }
 
-    // 2. Recursive Search
+    // 2. Recursive Search for Parameter
     function findParameterValue(propertiesData, paramName) {
         let foundValue = null;
         const targetName = paramName.toLowerCase();
@@ -96,132 +101,62 @@
         return foundValue;
     }
 
-    // 3. Forcefully Clear Viewer Selection 
-    async function clearSelectionRobustly() {
+    // 3. Highlight a single element when clicked
+    window.highlightItem = async function(modelId, elementId, domId) {
+        // UI Update: Remove green background from all items, apply to the clicked one
+        document.querySelectorAll('.result-item').forEach(el => el.style.backgroundColor = 'transparent');
+        document.getElementById(domId).style.backgroundColor = '#d4edda';
+
         if (!tcAPI) return;
-        try {
-            // The "set" mode is absolutely mandatory here to override existing selections
-            await tcAPI.viewer.setSelection([], "set");
-            
-            if (globalSortedResults.length > 0) {
-                const uniqueModels = [...new Set(globalSortedResults.map(item => item.modelId))];
-                const clearReq = uniqueModels.map(m => ({ modelId: m, objectRuntimeIds: [] }));
-                await tcAPI.viewer.setSelection(clearReq, "set");
-            }
-            
-            // Allow the viewer a fraction of a second to render the deselection before hiding
-            await new Promise(resolve => setTimeout(resolve, 200));
-        } catch (e) { 
-            console.error("Failed to clear selection:", e); 
-        }
-    }
-
-    // 4. Apply Visibility using Color Alpha Channel
-    async function applyElementVisibility(items, isVisible) {
-        if (!items || items.length === 0 || !tcAPI) return;
-        
-        const models = {};
-        items.forEach(item => {
-            if (!models[item.modelId]) models[item.modelId] = [];
-            models[item.modelId].push(item.id);
-        });
-        
-        const selectorArray = [];
-        for (const mId in models) {
-            selectorArray.push({ modelId: mId, objectRuntimeIds: models[mId] });
-        }
         
         try {
-            if (!isVisible) {
-                // Hide: Completely transparent
-                await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 128, g: 128, b: 128, a: 0.0 } });
-            } else {
-                // Show: Solid Green to track simulation clearly
-                await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 40, g: 167, b: 69, a: 1.0 } });
-            }
-        } catch (e) { 
-            console.error("Failed to set visibility state", e); 
-        }
-    }
-
-    // --- SIMULATION LOGIC ---
-
-    async function resetSimulation() {
-        pauseSimulation();
-        currentIndex = 0;
-
-        // Force deselection so the yellow outlines drop
-        await clearSelectionRobustly();
-        
-        // Hide ALL valid elements to prepare for simulation
-        await applyElementVisibility(globalSortedResults, false);
-
-        // Reset UI list highlighting
-        globalSortedResults.forEach(item => {
-            const el = document.getElementById(`item-${item.id}`);
-            if (el) el.style.backgroundColor = 'transparent';
-        });
-        document.getElementById('result-box').scrollTop = 0;
-    }
-
-    function playSimulation() {
-        if (simInterval || globalSortedResults.length === 0) return;
-        const speedMs = parseFloat(document.getElementById('sim-speed').value) * 1000;
-        simInterval = setInterval(() => { stepSimulation(); }, speedMs);
-        stepSimulation(); 
-    }
-
-    function pauseSimulation() {
-        if (simInterval) { clearInterval(simInterval); simInterval = null; }
-    }
-
-    async function stepSimulation() {
-        if (currentIndex < globalSortedResults.length) {
-            const currItem = globalSortedResults[currentIndex];
+            // Step A: Reset any previously applied custom colors back to normal
+            await tcAPI.viewer.setObjectState(undefined, { color: "reset" });
             
-            // Make the current element visible (solid green)
-            await applyElementVisibility([currItem], true); 
+            // Step B: Set the 3D viewer selection to ONLY this specific clicked element. 
+            // This naturally clears the massive 175+ yellow selection block.
+            await tcAPI.viewer.setSelection([{
+                modelId: modelId,
+                objectRuntimeIds: [elementId]
+            }]);
+
+            // Step C: Apply a solid Green color to the selected element
+            await tcAPI.viewer.setObjectState([{
+                modelId: modelId,
+                objectRuntimeIds: [elementId]
+            }], { color: { r: 40, g: 167, b: 69, a: 1.0 } });
             
-            // Highlight it in the UI list
-            const currEl = document.getElementById(`item-${currItem.id}`);
-            if (currEl) {
-                currEl.style.backgroundColor = '#d4edda'; 
-                currEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-            currentIndex++;
-        } else {
-            pauseSimulation(); 
+        } catch (error) {
+            console.error("Failed to highlight item:", error);
         }
-    }
+    };
 
-    // --- EVENT LISTENERS ---
-    
-    document.getElementById('sim-speed').addEventListener('input', function() { document.getElementById('speed-val').innerText = parseFloat(this.value).toFixed(1); });
-    document.getElementById('sim-speed').addEventListener('change', function() { if (simInterval) { pauseSimulation(); playSimulation(); } });
-    document.getElementById('btn-play').addEventListener('click', playSimulation);
-    document.getElementById('btn-pause').addEventListener('click', pauseSimulation);
-    document.getElementById('btn-reset').addEventListener('click', resetSimulation);
-
+    // 4. Main Button Click Listener
     document.getElementById('getValueBtn').addEventListener('click', async () => {
         const resultBox = document.getElementById('result-box');
+        const helpText = document.getElementById('help-text');
+        
         if (!tcAPI) { resultBox.innerText = "Error: API not connected."; return; }
 
         const paramName = document.getElementById('paramName').value.trim();
         if (!paramName) { resultBox.innerText = "Please type a parameter name."; return; }
 
         resultBox.innerText = "Fetching and sorting data...";
-        pauseSimulation();
+        helpText.style.display = "none";
         
+        // Reset colors in viewer before starting
+        try { await tcAPI.viewer.setObjectState(undefined, { color: "reset" }); } catch(e) {}
+
         try {
             const selection = await tcAPI.viewer.getSelection();
             if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
                 resultBox.innerText = "No objects selected.";
-                document.getElementById('sim-controls').style.display = "none";
                 return;
             }
 
             let resultsArray = [];
 
+            // Loop through all selected models and properties
             for (const sel of selection) {
                 const modelId = sel.modelId;
                 if (sel.objectRuntimeIds && sel.objectRuntimeIds.length > 0) {
@@ -235,7 +170,7 @@
                 }
             }
 
-            // Sort ascending based on value
+            // Sort ascending based on parameter value
             resultsArray.sort((a, b) => {
                 const valA = a.value, valB = b.value;
                 if (valA == null) return 1;
@@ -247,21 +182,26 @@
 
             globalSortedResults = resultsArray.filter(item => item.value !== null && item.value !== undefined);
 
+            // Generate HTML for the list, making each item clickable
             resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
+            
             resultsArray.forEach(item => {
+                const domId = `item-${item.id}`;
                 if (item.value !== null && item.value !== undefined) {
-                    resultBox.innerHTML += `<div class="result-item" id="item-${item.id}"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
+                    // Injecting onclick method to trigger the highlight function
+                    resultBox.innerHTML += `
+                        <div class="result-item" id="${domId}" onclick="highlightItem('${item.modelId}', ${item.id}, '${domId}')">
+                            <strong>ID ${item.id}:</strong> ${item.value}
+                        </div>`;
                 } else {
-                    resultBox.innerHTML += `<div class="result-item" style="color:red"><strong>ID ${item.id}:</strong> Not found</div>`;
+                    resultBox.innerHTML += `<div class="result-item" style="color:red; cursor:default;"><strong>ID ${item.id}:</strong> Not found</div>`;
                 }
             });
 
             if (globalSortedResults.length > 0) {
-                document.getElementById('sim-controls').style.display = "block";
-                resetSimulation(); 
+                helpText.style.display = "block"; // Show instructions
             } else {
-                document.getElementById('sim-controls').style.display = "none";
-                resultBox.innerHTML += `<br><em>No valid data to simulate.</em>`;
+                resultBox.innerHTML += `<br><em>No valid data to list.</em>`;
             }
 
         } catch (error) {
