@@ -16,7 +16,7 @@
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            max-width: 300px;
+            max-width: 350px;
         }
         label {
             font-size: 14px;
@@ -51,12 +51,24 @@
             background-color: #f1f1f1;
             border-left: 4px solid #005F9E;
             word-break: break-all;
-            min-height: 20px;
+            min-height: 40px;
+            max-height: 300px;
+            overflow-y: auto;
         }
         .status {
             font-size: 12px;
             color: #666;
             margin-bottom: 10px;
+        }
+        .result-item {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+        .result-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
         }
     </style>
 </head>
@@ -70,7 +82,7 @@
     
     <button id="getValueBtn">Get Parameter Value</button>
     
-    <div id="result-box">Select an element and search...</div>
+    <div id="result-box">Select elements and search...</div>
 </div>
 
 <!-- Using esm.sh to load the Workspace API natively in the browser -->
@@ -146,31 +158,36 @@
             // Get selected objects from the 3D Viewer
             const selection = await tcAPI.viewer.getSelection();
             
-            if (!selection || selection.length === 0 || selection[0].objectRuntimeIds.length === 0) {
-                resultBox.innerText = "No objects selected. Please click an element in the 3D viewer.";
+            // Check if nothing is selected
+            if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
+                resultBox.innerText = "No objects selected. Please click elements in the 3D viewer.";
                 return;
             }
 
-            // Extract the Model ID and Object ID of the first selected element
-            const modelId = selection[0].modelId;
-            const objectRuntimeId = selection[0].objectRuntimeIds[0];
+            resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
 
-            // Request the full property data for that specific element
-            const properties = await tcAPI.viewer.getObjectProperties(modelId, [objectRuntimeId]);
-            
-            if (properties && properties.length > 0) {
-                const objectData = properties[0];
+            // Loop through all selected models
+            for (const sel of selection) {
+                const modelId = sel.modelId;
                 
-                // Search for the parameter 
-                const value = findParameterValue(objectData, paramName);
+                // Only process if there are objects selected in this particular model
+                if (sel.objectRuntimeIds && sel.objectRuntimeIds.length > 0) {
+                    // Fetch properties for all selected objects in this model at once
+                    const propertiesList = await tcAPI.viewer.getObjectProperties(modelId, sel.objectRuntimeIds);
+                    
+                    if (propertiesList && propertiesList.length > 0) {
+                        propertiesList.forEach((objectData, index) => {
+                            const value = findParameterValue(objectData, paramName);
+                            const elementId = sel.objectRuntimeIds[index];
 
-                if (value !== null && value !== undefined) {
-                    resultBox.innerHTML = `<strong>${paramName}:</strong> <br>${value}`;
-                } else {
-                    resultBox.innerText = `Parameter "${paramName}" not found on this element.`;
+                            if (value !== null && value !== undefined) {
+                                resultBox.innerHTML += `<div class="result-item"><strong>ID ${elementId}:</strong> ${value}</div>`;
+                            } else {
+                                resultBox.innerHTML += `<div class="result-item"><strong>ID ${elementId}:</strong> <span style="color:red">Not found</span></div>`;
+                            }
+                        });
+                    }
                 }
-            } else {
-                resultBox.innerText = "No properties found for this element.";
             }
 
         } catch (error) {
