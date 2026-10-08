@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trimble Connect Parameter Viewer</title>
+    <title>Trimble Connect Parameter Simulator</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -24,7 +24,7 @@
             display: block;
             margin-bottom: 5px;
         }
-        input {
+        input[type="text"] {
             width: 100%;
             padding: 8px;
             margin-bottom: 15px;
@@ -32,7 +32,7 @@
             border-radius: 4px;
             box-sizing: border-box;
         }
-        button {
+        .btn-main {
             width: 100%;
             padding: 10px;
             background-color: #005F9E;
@@ -42,9 +42,8 @@
             cursor: pointer;
             font-weight: 600;
         }
-        button:hover {
-            background-color: #004573;
-        }
+        .btn-main:hover { background-color: #004573; }
+        
         #result-box {
             margin-top: 15px;
             padding: 10px;
@@ -52,7 +51,7 @@
             border-left: 4px solid #005F9E;
             word-break: break-all;
             min-height: 40px;
-            max-height: 300px;
+            max-height: 200px;
             overflow-y: auto;
         }
         .status {
@@ -64,11 +63,45 @@
             margin-bottom: 8px;
             padding-bottom: 8px;
             border-bottom: 1px solid #ddd;
+            transition: background-color 0.3s;
         }
         .result-item:last-child {
             border-bottom: none;
             margin-bottom: 0;
             padding-bottom: 0;
+        }
+
+        /* Simulation Controls Styles */
+        #sim-controls {
+            display: none; /* Hidden until data is loaded */
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #ccc;
+        }
+        .sim-btn-group {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        .sim-btn {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            color: white;
+        }
+        #btn-play { background-color: #28a745; }
+        #btn-play:hover { background-color: #218838; }
+        #btn-pause { background-color: #ffc107; color: #333; }
+        #btn-pause:hover { background-color: #e0a800; }
+        #btn-reset { background-color: #dc3545; }
+        #btn-reset:hover { background-color: #c82333; }
+        
+        input[type="range"] {
+            width: 100%;
+            margin-top: 5px;
         }
     </style>
 </head>
@@ -80,15 +113,32 @@
     <label for="paramName">IFC Parameter Name:</label>
     <input type="text" id="paramName" placeholder="e.g. Volume, Reference, etc.">
     
-    <button id="getValueBtn">Get Parameter Value</button>
+    <button id="getValueBtn" class="btn-main">Get & Sort Parameter</button>
     
     <div id="result-box">Select elements and search...</div>
+
+    <!-- Simulation Controls -->
+    <div id="sim-controls">
+        <label>Playback Speed: <span id="speed-val">1.0</span>s / step</label>
+        <input type="range" id="sim-speed" min="0.5" max="3" step="0.1" value="1">
+        
+        <div class="sim-btn-group">
+            <button id="btn-play" class="sim-btn">Play</button>
+            <button id="btn-pause" class="sim-btn">Pause</button>
+            <button id="btn-reset" class="sim-btn">Reset</button>
+        </div>
+    </div>
 </div>
 
 <script type="module">
     import * as WorkspaceAPI from 'https://esm.sh/trimble-connect-workspace-api';
 
     let tcAPI = null;
+    let globalSortedResults = []; // Stores the sorted element data
+    
+    // Simulation variables
+    let simInterval = null;
+    let currentIndex = 0;
 
     // 1. Connect to the parent Trimble Connect window
     async function initExtension() {
@@ -103,7 +153,7 @@
         }
     }
 
-    // 2. Recursive function to find the parameter inside deep IFC Property Sets
+    // 2. Recursive Search for Parameter
     function findParameterValue(propertiesData, paramName) {
         let foundValue = null;
         const targetName = paramName.toLowerCase();
@@ -132,7 +182,103 @@
         return foundValue;
     }
 
-    // 3. Handle Button Click
+    // 3. Apply Colors to Elements via Trimble Connect API
+    async function applyColorToElements(items, r, g, b, a) {
+        if (!items || items.length === 0 || !tcAPI) return;
+        
+        // Group object IDs by Model ID (required by the API structure)
+        const models = {};
+        items.forEach(item => {
+            if (!models[item.modelId]) models[item.modelId] = [];
+            models[item.modelId].push(item.id);
+        });
+        
+        const colorRequests = [];
+        for (const mId in models) {
+            colorRequests.push({
+                modelId: mId,
+                objectRuntimeIds: models[mId],
+                color: { r: r, g: g, b: b, a: a }
+            });
+        }
+        
+        try {
+            await tcAPI.viewer.setColors(colorRequests);
+        } catch (e) {
+            console.error("Failed to set colors", e);
+        }
+    }
+
+    // --- SIMULATION LOGIC ---
+
+    function resetSimulation() {
+        pauseSimulation();
+        currentIndex = 0;
+        
+        // Ghost all elements: Grey color with 20% opacity (0.2 alpha)
+        applyColorToElements(globalSortedResults, 128, 128, 128, 0.2);
+    }
+
+    function playSimulation() {
+        if (simInterval || globalSortedResults.length === 0) return; // Prevent double-triggering
+        
+        const speedMs = parseFloat(document.getElementById('sim-speed').value) * 1000;
+        
+        // Execute steps based on the slider timing
+        simInterval = setInterval(() => {
+            stepSimulation();
+        }, speedMs);
+        
+        // Immediately trigger the first step so there's no delay
+        stepSimulation();
+    }
+
+    function pauseSimulation() {
+        if (simInterval) {
+            clearInterval(simInterval);
+            simInterval = null;
+        }
+    }
+
+    function stepSimulation() {
+        // 1. Turn the PREVIOUS element Green (finished)
+        if (currentIndex > 0) {
+            const prevItem = globalSortedResults[currentIndex - 1];
+            applyColorToElements([prevItem], 0, 255, 0, 1.0); // Solid Green
+        }
+        
+        // 2. Turn the CURRENT element Yellow (active)
+        if (currentIndex < globalSortedResults.length) {
+            const currItem = globalSortedResults[currentIndex];
+            applyColorToElements([currItem], 255, 255, 0, 1.0); // Solid Yellow
+            currentIndex++;
+        } else {
+            // Reached the end: pause interval (the last item turned green in the block above)
+            pauseSimulation();
+        }
+    }
+
+    // --- EVENT LISTENERS ---
+
+    // Slider UI updater
+    document.getElementById('sim-speed').addEventListener('input', function() {
+        document.getElementById('speed-val').innerText = parseFloat(this.value).toFixed(1);
+    });
+
+    // If speed is changed while playing, restart the interval seamlessly
+    document.getElementById('sim-speed').addEventListener('change', function() {
+        if (simInterval) {
+            pauseSimulation();
+            playSimulation();
+        }
+    });
+
+    // Button controls
+    document.getElementById('btn-play').addEventListener('click', playSimulation);
+    document.getElementById('btn-pause').addEventListener('click', pauseSimulation);
+    document.getElementById('btn-reset').addEventListener('click', resetSimulation);
+
+    // Main Fetch & Sort Button
     document.getElementById('getValueBtn').addEventListener('click', async () => {
         const resultBox = document.getElementById('result-box');
         
@@ -148,18 +294,26 @@
         }
 
         resultBox.innerText = "Fetching and sorting data...";
+        
+        // Reset old simulation state and clear any existing colors before running a new search
+        pauseSimulation();
+        globalSortedResults = [];
+        try {
+            if(tcAPI.viewer.resetColors) await tcAPI.viewer.resetColors();
+        } catch(e) { /* Ignore if not supported */ }
 
         try {
             const selection = await tcAPI.viewer.getSelection();
             
             if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
                 resultBox.innerText = "No objects selected. Please click elements in the 3D viewer.";
+                document.getElementById('sim-controls').style.display = "none";
                 return;
             }
 
-            let resultsArray = []; // Collect results here first
+            let resultsArray = [];
 
-            // Loop through all selected models
+            // Loop through selected models
             for (const sel of selection) {
                 const modelId = sel.modelId;
                 
@@ -171,44 +325,51 @@
                             const value = findParameterValue(objectData, paramName);
                             const elementId = sel.objectRuntimeIds[index];
 
-                            // Store in array for sorting
-                            resultsArray.push({ id: elementId, value: value });
+                            // Store modelId for the color API
+                            resultsArray.push({ modelId: modelId, id: elementId, value: value });
                         });
                     }
                 }
             }
 
-            // 4. Sort the collected array in ascending order
+            // Sort ascending
             resultsArray.sort((a, b) => {
                 const valA = a.value;
                 const valB = b.value;
 
-                // Push "Not found" (null/undefined) values to the very bottom
                 if (valA === null || valA === undefined) return 1;
                 if (valB === null || valB === undefined) return -1;
 
-                // Try to treat as numbers for proper numeric sorting (e.g. 2 before 10)
                 const numA = Number(valA);
                 const numB = Number(valB);
 
                 if (!isNaN(numA) && !isNaN(numB)) {
                     return numA - numB;
                 }
-
-                // If they aren't numbers, sort them alphabetically as text
                 return String(valA).localeCompare(String(valB));
             });
 
-            // 5. Render the sorted HTML
+            // Save globally for the simulator (exclude items where value was not found)
+            globalSortedResults = resultsArray.filter(item => item.value !== null && item.value !== undefined);
+
+            // Render HTML
             resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
-            
             resultsArray.forEach(item => {
                 if (item.value !== null && item.value !== undefined) {
-                    resultBox.innerHTML += `<div class="result-item"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
+                    resultBox.innerHTML += `<div class="result-item" id="item-${item.id}"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
                 } else {
-                    resultBox.innerHTML += `<div class="result-item"><strong>ID ${item.id}:</strong> <span style="color:red">Not found</span></div>`;
+                    resultBox.innerHTML += `<div class="result-item" style="color:red"><strong>ID ${item.id}:</strong> Not found</div>`;
                 }
             });
+
+            // Show Simulation Panel and initialize the Ghosting effect
+            if (globalSortedResults.length > 0) {
+                document.getElementById('sim-controls').style.display = "block";
+                resetSimulation(); 
+            } else {
+                document.getElementById('sim-controls').style.display = "none";
+                resultBox.innerHTML += `<br><em>No valid data to simulate.</em>`;
+            }
 
         } catch (error) {
             console.error("API Error:", error);
