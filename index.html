@@ -72,6 +72,7 @@
             margin-bottom: 0;
         }
 
+        /* Simulation Controls Styles */
         #sim-controls {
             display: none; 
             margin-top: 15px;
@@ -177,7 +178,7 @@
         return foundValue;
     }
 
-    // 3. Apply Colors via Trimble API
+    // 3. Apply Colors via Trimble Workspace API `setObjectState`
     async function applyColorToElements(items, r, g, b, a) {
         if (!items || items.length === 0 || !tcAPI) return;
         
@@ -187,19 +188,19 @@
             models[item.modelId].push(item.id);
         });
         
-        const colorRequests = [];
+        const selectorArray = [];
         for (const mId in models) {
-            colorRequests.push({
+            selectorArray.push({
                 modelId: mId,
-                objectRuntimeIds: models[mId],
-                color: { r: r, g: g, b: b, a: a }
+                objectRuntimeIds: models[mId]
             });
         }
         
         try {
-            await tcAPI.viewer.setColors(colorRequests);
+            // Workspace API specifically uses setObjectState for color overrides
+            await tcAPI.viewer.setObjectState(selectorArray, { color: { r, g, b, a } });
         } catch (e) {
-            console.error("Failed to set colors", e);
+            console.error("Failed to set colors. Check API version", e);
         }
     }
 
@@ -209,7 +210,7 @@
         pauseSimulation();
         currentIndex = 0;
         
-        // Ghost all elements: Grey with 20% opacity
+        // Ghost all elements: Grey with 20% opacity (0.2 alpha)
         applyColorToElements(globalSortedResults, 128, 128, 128, 0.2);
 
         // Reset UI list highlighting
@@ -262,7 +263,8 @@
         }
     }
 
-    // --- LISTENERS ---
+    // --- EVENT LISTENERS ---
+    
     document.getElementById('sim-speed').addEventListener('input', function() {
         document.getElementById('speed-val').innerText = parseFloat(this.value).toFixed(1);
     });
@@ -290,7 +292,10 @@
         pauseSimulation();
         globalSortedResults = [];
         
-        try { if(tcAPI.viewer.resetColors) await tcAPI.viewer.resetColors(); } catch(e) {}
+        // 1. Reset any previously applied custom colors back to default materials
+        try { 
+            await tcAPI.viewer.setObjectState(undefined, { color: "reset" });
+        } catch(e) {}
 
         try {
             const selection = await tcAPI.viewer.getSelection();
@@ -335,18 +340,14 @@
                 }
             });
 
-            // ROBUST CLEAR SELECTION: Force the active model(s) to clear their selection list
-            // This drops the default yellow boundary highlight so the custom colors are visible.
+            // 2. Clear viewer selection specifically using the "set" mode on an empty array
             try { 
-                const clearSelectionRequest = selection.map(sel => ({
-                    modelId: sel.modelId,
-                    objectRuntimeIds: [] 
-                }));
-                await tcAPI.viewer.setSelection(clearSelectionRequest); 
+                await tcAPI.viewer.setSelection([], "set"); 
             } catch(e) {
                 console.error("Selection clearing failed:", e);
             }
 
+            // 3. Initialize the visual ghosting
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
                 resetSimulation(); 
