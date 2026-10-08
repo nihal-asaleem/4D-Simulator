@@ -72,7 +72,6 @@
             margin-bottom: 0;
         }
 
-        /* Simulation Controls Styles */
         #sim-controls {
             display: none; 
             margin-top: 15px;
@@ -178,7 +177,7 @@
         return foundValue;
     }
 
-    // 3. Apply Visibility via Trimble API
+    // 3. Apply Visibility via Trimble Connect Workspace API
     async function applyVisibilityToElements(items, isVisible) {
         if (!items || items.length === 0 || !tcAPI) return;
         
@@ -197,7 +196,15 @@
         }
         
         try {
-            await tcAPI.viewer.setVisibility(selectorArray, isVisible);
+            // Workspace API handles visibility through ObjectState configuration
+            await tcAPI.viewer.setObjectState(selectorArray, { visible: isVisible });
+            
+            // Robust Fallback: If `visible: false` fails due to API versioning, force 100% transparency
+            if (!isVisible) {
+                 await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 0, g: 0, b: 0, a: 0.0 } });
+            } else {
+                 await tcAPI.viewer.setObjectState(selectorArray, { color: "reset" });
+            }
         } catch (e) {
             console.error("Failed to set visibility", e);
         }
@@ -205,12 +212,15 @@
 
     // --- SIMULATION LOGIC ---
 
-    function resetSimulation() {
+    async function resetSimulation() {
         pauseSimulation();
         currentIndex = 0;
+
+        // Vital: Clear active selections to drop the yellow bounding box before hiding
+        try { await tcAPI.viewer.setSelection([], "set"); } catch(e) {}
         
-        // Hide ALL elements in the list to start the simulation
-        applyVisibilityToElements(globalSortedResults, false);
+        // Hide ALL valid elements in the list to prepare the simulation
+        await applyVisibilityToElements(globalSortedResults, false);
 
         // Reset UI list highlighting
         globalSortedResults.forEach(item => {
@@ -226,7 +236,7 @@
         
         const speedMs = parseFloat(document.getElementById('sim-speed').value) * 1000;
         simInterval = setInterval(() => { stepSimulation(); }, speedMs);
-        stepSimulation(); // Trigger first step immediately
+        stepSimulation(); 
     }
 
     function pauseSimulation() {
@@ -236,22 +246,21 @@
         }
     }
 
-    function stepSimulation() {
+    async function stepSimulation() {
         if (currentIndex < globalSortedResults.length) {
             const currItem = globalSortedResults[currentIndex];
             
             // Make the current element visible
-            applyVisibilityToElements([currItem], true); 
+            await applyVisibilityToElements([currItem], true); 
             
             // Highlight it in the UI list
             const currEl = document.getElementById(`item-${currItem.id}`);
             if (currEl) {
-                currEl.style.backgroundColor = '#d4edda'; // UI Light Green
+                currEl.style.backgroundColor = '#d4edda'; 
                 currEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
             currentIndex++;
         } else {
-            // Reached the end
             pauseSimulation();
         }
     }
@@ -284,7 +293,7 @@
         
         pauseSimulation();
         
-        // If there were old elements, make sure they are visible again before fetching new ones
+        // Reset any previously hidden elements back to visible before grabbing new data
         if (globalSortedResults.length > 0) {
             await applyVisibilityToElements(globalSortedResults, true);
         }
@@ -313,7 +322,6 @@
                 }
             }
 
-            // Sort ascending based on value
             resultsArray.sort((a, b) => {
                 const valA = a.value, valB = b.value;
                 if (valA == null) return 1;
@@ -334,12 +342,10 @@
                 }
             });
 
-            // Clear viewer selection so elements don't stay highlighted
-            try { await tcAPI.viewer.setSelection([], "set"); } catch(e) {}
-
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
-                resetSimulation(); // This immediately hides all valid sorted elements
+                // Trigger the initial hide for all sorted elements immediately
+                resetSimulation(); 
             } else {
                 document.getElementById('sim-controls').style.display = "none";
                 resultBox.innerHTML += `<br><em>No valid data to simulate.</em>`;
