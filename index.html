@@ -96,18 +96,20 @@
         return foundValue;
     }
 
-    // 3. Clear Viewer Selection (Aggressive)
-    async function clearSelectionRobustly(models) {
+    // 3. Clear Viewer Selection Safely
+    async function clearSelectionRobustly() {
         if (!tcAPI) return;
         try {
-            // Force active models to drop their object selection arrays
-            const clearReq = models.map(m => ({ modelId: m, objectRuntimeIds: [] }));
-            await tcAPI.viewer.setSelection(clearReq);
+            // A simple empty array drops the active selection natively
             await tcAPI.viewer.setSelection([]);
-        } catch (e) { console.error("Failed to clear selection:", e); }
+            // Crucial: Wait 250ms for the viewer to update and drop the yellow lines before hiding
+            await new Promise(resolve => setTimeout(resolve, 250));
+        } catch (e) { 
+            console.error("Failed to clear selection:", e); 
+        }
     }
 
-    // 4. Apply Visibility using strict color Alpha channels
+    // 4. Apply Visibility using Color Alpha Channel
     async function applyElementVisibility(items, isVisible) {
         if (!items || items.length === 0 || !tcAPI) return;
         
@@ -124,13 +126,15 @@
         
         try {
             if (!isVisible) {
-                // Hide: Make completely transparent (Alpha 0.0)
-                await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 200, g: 200, b: 200, a: 0.0 } });
+                // Hide: Completely transparent
+                await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 0, g: 0, b: 0, a: 0.0 } });
             } else {
-                // Show: Make solid Green (Alpha 1.0) - bypasses the buggy color:"reset" API
+                // Show: Solid Green to track simulation clearly
                 await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 40, g: 167, b: 69, a: 1.0 } });
             }
-        } catch (e) { console.error("Failed to set visibility state", e); }
+        } catch (e) { 
+            console.error("Failed to set visibility state", e); 
+        }
     }
 
     // --- SIMULATION LOGIC ---
@@ -139,9 +143,8 @@
         pauseSimulation();
         currentIndex = 0;
 
-        // Get unique model IDs from our results to clear their selections
-        const uniqueModels = [...new Set(globalSortedResults.map(item => item.modelId))];
-        await clearSelectionRobustly(uniqueModels);
+        // Force deselection to drop the yellow bounding boxes
+        await clearSelectionRobustly();
         
         // Hide ALL valid elements to prepare for simulation
         await applyElementVisibility(globalSortedResults, false);
