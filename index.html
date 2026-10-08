@@ -86,7 +86,6 @@
     let viewerAPI = null;
     let workspaceAPI = null;
 
-    // --- APPLICATION STATE ---
     const State = {
         sequenceData: [], 
         currentIndex: 0,
@@ -97,7 +96,6 @@
         lastParamName: "" 
     };
 
-    // --- UI ELEMENTS ---
     const UI = {
         paramName: document.getElementById('paramName'),
         btnPlay: document.getElementById('btnPlay'),
@@ -108,7 +106,7 @@
         statusDisplay: document.getElementById('statusDisplay')
     };
 
-    // --- INITIALIZE API SAFELY ---
+    // Safely Initialize API Connection
     async function initTrimbleAPI() {
         if (viewerAPI) return true;
         try {
@@ -129,7 +127,6 @@
         }
     }
 
-    // Safely map hex codes to RGBA for the API
     function hexToRgba(hex, alpha = 255) {
         const r = parseInt(hex.slice(1, 3), 16);
         const g = parseInt(hex.slice(3, 5), 16);
@@ -137,7 +134,6 @@
         return { r, g, b, a: alpha }; 
     }
 
-    // --- EVENT LISTENERS ---
     UI.speedSlider.addEventListener('input', (e) => {
         UI.speedValue.textContent = parseFloat(e.target.value).toFixed(1) + 's';
         if (State.isPlaying) {
@@ -150,24 +146,36 @@
     UI.btnPause.addEventListener('click', pauseSimulation);
     UI.btnReset.addEventListener('click', resetSimulation);
 
-    // --- CORE LOGIC ---
+    // Ultra-Robust Deep Search: Scans every branch of the property JSON, case-insensitive
+    function extractPropertyValues(objProps, targetName) {
+        let results = [];
+        const lowerTarget = String(targetName).trim().toLowerCase();
 
-    // Case-insensitive recursive search to find properties hidden in sets like 'Construction Sequence'
-    function findPropertyValue(propertiesArray, targetName) {
-        if (!propertiesArray || !Array.isArray(propertiesArray)) return null;
-
-        for (const prop of propertiesArray) {
-            // Check if this is the target property (case-insensitive)
-            if (prop.name && String(prop.name).trim().toLowerCase() === String(targetName).trim().toLowerCase() && prop.value !== undefined) {
-                return prop.value;
+        function search(obj) {
+            if (!obj) return;
+            if (Array.isArray(obj)) {
+                obj.forEach(search);
+                return;
             }
-            // Check if this is a Property Set (like "Construction Sequence") with nested properties
-            if (prop.properties && Array.isArray(prop.properties)) {
-                const nestedResult = findPropertyValue(prop.properties, targetName);
-                if (nestedResult !== null) return nestedResult;
+            if (typeof obj === 'object') {
+                if (obj.name !== undefined && String(obj.name).trim().toLowerCase() === lowerTarget) {
+                    let val = obj.value !== undefined ? obj.value : (obj.displayValue !== undefined ? obj.displayValue : null);
+                    if (val !== null) results.push(val);
+                }
+                for (let key in obj) {
+                    if (String(key).trim().toLowerCase() === lowerTarget) {
+                        if (typeof obj[key] === 'string' || typeof obj[key] === 'number') {
+                            results.push(obj[key]);
+                        }
+                    }
+                    if (typeof obj[key] === 'object') {
+                        search(obj[key]);
+                    }
+                }
             }
         }
-        return null;
+        search(objProps);
+        return results;
     }
 
     async function fetchSequenceData(paramName) {
@@ -176,11 +184,9 @@
         if (!isConnected) return false;
 
         try {
-            UI.statusDisplay.textContent = "Scanning full model...";
+            UI.statusDisplay.textContent = "Fetching object IDs...";
             
-            // IMPORTANT FIX 1: Omitting { selected: true } to guarantee it scans the entire building
             let modelEntities = await viewerAPI.getObjects();
-
             if (!modelEntities || modelEntities.length === 0) {
                 UI.statusDisplay.textContent = "No objects found in model.";
                 return false;
@@ -190,36 +196,50 @@
             const groupedMap = new Map();
             let objectsFound = 0;
 
-            // Loop through all loaded models (usually just 1 for a single IFC)
             for (const entity of modelEntities) {
                 const modelId = entity.modelId;
                 const runtimeIds = entity.objectRuntimeIds;
 
                 if (!runtimeIds || runtimeIds.length === 0) continue;
 
-                // IMPORTANT FIX 2: Correct API Signature (modelId, runtimeIds)
-                const propertiesList = await viewerAPI.getObjectProperties(modelId, runtimeIds);
+                // FIX: Chunking to prevent API Payload timeouts
+                const chunkSize = 500; 
                 
-                // propertiesList contains property data for every assembly
-                for (const objProps of propertiesList) {
-                    const targetValue = findPropertyValue(objProps.properties, paramName);
-
-                    if (targetValue !== null && targetValue !== undefined) {
-                        const val = parseFloat(targetValue); 
-                        if (!isNaN(val)) {
-                            if (!groupedMap.has(val)) groupedMap.set(val, []);
-                            
-                            groupedMap.get(val).push({
-                                modelId: objProps.modelId,
-                                objectRuntimeId: objProps.objectRuntimeId
-                            });
-                            objectsFound++;
+                for (let i = 0; i < runtimeIds.length; i += chunkSize) {
+                    const chunk = runtimeIds.slice(i, i + chunkSize);
+                    
+                    // Show progress in the UI
+                    UI.statusDisplay.textContent = `Scanning chunk ${i} to ${Math.min(i + chunkSize, runtimeIds.length)}...`;
+                    
+                    try {
+                        const propertiesList = await viewerAPI.getObjectProperties(modelId, chunk);
+                        
+                        if (propertiesList) {
+                            for (const objProps of propertiesList) {
+                                // Extract any value associated with the property name
+                                const values = extractPropertyValues(objProps, paramName);
+                                
+                                for (let v of values) {
+                                    const parsed = parseFloat(v);
+                                    if (!isNaN(parsed)) {
+                                        if (!groupedMap.has(parsed)) groupedMap.set(parsed, []);
+                                        
+                                        groupedMap.get(parsed).push({
+                                            modelId: objProps.modelId,
+                                            objectRuntimeId: objProps.objectRuntimeId
+                                        });
+                                        objectsFound++;
+                                        break; // Found valid sequence number, skip other properties
+                                    }
+                                }
+                            }
                         }
+                    } catch (chunkErr) {
+                        console.warn(`Failed to fetch properties for chunk ${i}`, chunkErr);
                     }
                 }
             }
 
-            // Grouping and ordering sequentially
             State.sequenceData = Array.from(groupedMap.entries())
                 .map(([orderValue, objects]) => {
                     const modelMap = new Map();
@@ -235,13 +255,14 @@
 
                     return { orderValue, mappedEntities: mappedIds };
                 })
-                .sort((a, b) => a.orderValue - b.orderValue); // Sort numerically
+                .sort((a, b) => a.orderValue - b.orderValue);
 
             if (State.sequenceData.length === 0) {
                 UI.statusDisplay.textContent = `No objects found with parameter: ${paramName}`;
                 return false;
             }
 
+            UI.statusDisplay.textContent = `Found ${objectsFound} objects. Ready.`;
             State.lastParamName = paramName;
             return true;
 
@@ -267,7 +288,6 @@
         UI.btnPause.disabled = true;
         UI.btnReset.disabled = true;
 
-        // Fetch property data if necessary
         if (State.sequenceData.length === 0 || State.lastParamName !== paramName) {
             const success = await fetchSequenceData(paramName);
             if (!success) {
@@ -277,7 +297,6 @@
             }
         }
 
-        // State 1: Apply Grey Ghost State (Pending)
         if (!State.hasGhosted && State.currentIndex === 0) {
             UI.statusDisplay.textContent = "Ghosting model...";
             await applyColor(State.allObjects, "#d3d3d3", 50); 
@@ -289,8 +308,6 @@
         UI.btnReset.disabled = false;
 
         const speedMs = parseFloat(UI.speedSlider.value) * 1000;
-        
-        // Execute the first step instantly and start the loop
         executeStep();
         State.intervalId = setInterval(executeStep, speedMs);
     }
@@ -311,11 +328,10 @@
         
         if (viewerAPI) {
             try {
-                // Remove color overrides by passing undefined
                 const selector = { modelObjectIds: State.allObjects };
                 await viewerAPI.setObjectState(selector, { color: undefined });
             } catch (err) {
-                console.warn("Could not completely reset colors", err);
+                console.warn("Could not reset colors", err);
             }
         }
         
@@ -336,15 +352,12 @@
         const currentStep = State.sequenceData[State.currentIndex];
         UI.statusDisplay.textContent = `Current Sequence: ${currentStep.orderValue}`;
 
-        // State 3: Complete Previous Step (Solid Green)
         if (State.currentIndex > 0) {
             const previousStep = State.sequenceData[State.currentIndex - 1];
             await applyColor(previousStep.mappedEntities, "#2ecc71", 255); 
         }
 
-        // State 2: Highlight Active Step (Solid Yellow)
         await applyColor(currentStep.mappedEntities, "#f1c40f", 255); 
-
         State.currentIndex++;
     }
 </script>
