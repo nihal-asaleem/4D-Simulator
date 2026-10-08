@@ -32,13 +32,12 @@
         .slider-container { display: flex; align-items: center; gap: 12px; }
         .slider-container input[type="range"] { flex-grow: 1; }
         .slider-value { min-width: 45px; text-align: right; font-weight: bold; }
-        .btn { background-color: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: background-color 0.2s; font-size: 14px; width: 100%; margin-bottom: 8px; }
+        .btn { background-color: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: background-color 0.2s; font-size: 14px; width: 100%; flex-grow: 1; }
         .btn:hover { background-color: var(--primary-hover); }
         .btn:disabled { background-color: #a0c4db; cursor: not-allowed; }
         .btn-secondary { background-color: #ecf0f1; color: var(--text-main); border: 1px solid var(--border-color); }
         .btn-secondary:hover { background-color: #d5dbdb; }
         .controls { display: flex; gap: 8px; margin-bottom: 16px; }
-        .controls .btn { margin-bottom: 0; }
         .status-panel { background-color: #f8f9fa; border: 1px solid var(--border-color); border-radius: 4px; padding: 12px; text-align: center; font-size: 16px; font-weight: bold; }
         .legend { display: flex; justify-content: space-between; margin-top: 16px; font-size: 11px; color: var(--text-muted); }
         .legend-item { display: flex; align-items: center; gap: 4px; }
@@ -58,8 +57,6 @@
         <input type="text" id="paramName" value="Sequence">
     </div>
 
-    <button id="btnLoad" class="btn">Load Data</button>
-
     <div class="form-group" style="margin-top: 16px;">
         <label for="speedSlider">Playback Speed (Seconds per step)</label>
         <div class="slider-container">
@@ -69,13 +66,13 @@
     </div>
 
     <div class="controls">
-        <button id="btnPlay" class="btn" disabled>Play</button>
+        <button id="btnPlay" class="btn">Play</button>
         <button id="btnPause" class="btn btn-secondary" disabled>Pause</button>
         <button id="btnReset" class="btn btn-secondary" disabled>Reset</button>
     </div>
 
     <div class="status-panel" id="statusDisplay">
-        Current Sequence: None
+        Ready to start
     </div>
 
     <div class="legend">
@@ -101,12 +98,12 @@
         }
     }
 
-    // A helper function to safely map hex codes to RGBA for the API
+    // Safely map hex codes to RGBA for the API
     function hexToRgba(hex, alpha = 255) {
         const r = parseInt(hex.slice(1, 3), 16);
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
-        return { r, g, b, a: alpha }; // Trimble Connect color format
+        return { r, g, b, a: alpha }; 
     }
 
     // --- APPLICATION STATE ---
@@ -116,13 +113,13 @@
         isPlaying: false,
         intervalId: null,
         hasGhosted: false,
-        allObjects: [] 
+        allObjects: [],
+        lastParamName: "" // Track if we need to reload data
     };
 
     // --- UI ELEMENTS ---
     const UI = {
         paramName: document.getElementById('paramName'),
-        btnLoad: document.getElementById('btnLoad'),
         btnPlay: document.getElementById('btnPlay'),
         btnPause: document.getElementById('btnPause'),
         btnReset: document.getElementById('btnReset'),
@@ -140,31 +137,41 @@
         }
     });
 
-    UI.btnLoad.addEventListener('click', loadData);
     UI.btnPlay.addEventListener('click', playSimulation);
     UI.btnPause.addEventListener('click', pauseSimulation);
     UI.btnReset.addEventListener('click', resetSimulation);
 
     // --- CORE LOGIC ---
 
-    async function loadData() {
+    // Recursive search to guarantee we find the property no matter how deeply nested it is
+    function findPropertyValueRecursively(propertiesArray, targetName) {
+        if (!propertiesArray || !Array.isArray(propertiesArray)) return null;
+
+        for (const prop of propertiesArray) {
+            // If we found the property itself
+            if (prop.name === targetName && prop.value !== undefined) {
+                return prop.value;
+            }
+            // If it's a property set / category, search inside it
+            if (prop.properties && Array.isArray(prop.properties)) {
+                const nestedResult = findPropertyValueRecursively(prop.properties, targetName);
+                if (nestedResult !== null) return nestedResult;
+            }
+        }
+        return null;
+    }
+
+    async function fetchSequenceData(paramName) {
         await initTrimbleAPI();
-        if (!viewerAPI) return;
+        if (!viewerAPI) return false;
 
-        const paramName = UI.paramName.value.trim();
-        if (!paramName) return alert("Please enter a parameter name.");
-
-        UI.btnLoad.textContent = "Loading...";
-        UI.btnLoad.disabled = true;
-        UI.statusDisplay.textContent = "Loading data...";
+        UI.statusDisplay.textContent = "Scanning model for properties...";
 
         try {
-            // 1. Get all loaded objects in the Viewer 
             const modelEntities = await viewerAPI.getObjects();
             const groupedMap = new Map();
             State.allObjects = [];
 
-            // 2. Loop through each model in the viewer
             for (const entity of modelEntities) {
                 const modelId = entity.modelId;
                 const runtimeIds = entity.objectRuntimeIds;
@@ -173,30 +180,12 @@
                 
                 State.allObjects.push({ modelId: modelId, objectRuntimeIds: runtimeIds });
 
-                // 3. Fetch properties for these objects
                 const propertiesList = await viewerAPI.getObjectProperties(modelId, runtimeIds);
                 
-                // 4. Robust Dynamic Parsing (Checks nested groups like "Construction Sequence")
                 propertiesList.forEach(objProps => {
-                    let targetValue = null;
+                    // Use recursive search to find the value anywhere in the properties tree
+                    const targetValue = findPropertyValueRecursively(objProps.properties, paramName);
 
-                    // objProps.properties contains the property sets
-                    if (objProps.properties && Array.isArray(objProps.properties)) {
-                        objProps.properties.forEach(propSet => {
-                            
-                            // Check inside nested groups (e.g., "Construction Sequence")
-                            if (propSet.properties && Array.isArray(propSet.properties)) {
-                                const found = propSet.properties.find(p => p.name === paramName);
-                                if (found) targetValue = found.value;
-                            } 
-                            // Fallback for flat structures
-                            else if (propSet.name === paramName) {
-                                targetValue = propSet.value;
-                            }
-                        });
-                    }
-
-                    // 5. Group the object if the property was found
                     if (targetValue !== null && targetValue !== undefined) {
                         const val = parseFloat(targetValue); 
                         
@@ -212,10 +201,8 @@
                 });
             }
 
-            // 6. Sort groups in ascending numerical order
             State.sequenceData = Array.from(groupedMap.entries())
                 .map(([orderValue, objects]) => {
-                    // Group objects back into modelId -> objectRuntimeIds format for the API
                     const modelMap = new Map();
                     objects.forEach(obj => {
                         if (!modelMap.has(obj.modelId)) modelMap.set(obj.modelId, []);
@@ -233,21 +220,16 @@
 
             if (State.sequenceData.length === 0) {
                 UI.statusDisplay.textContent = `No objects found with parameter: ${paramName}`;
-                return;
+                return false;
             }
 
-            UI.btnPlay.disabled = false;
-            UI.btnReset.disabled = false;
-            UI.statusDisplay.textContent = `Data Loaded. Found ${State.sequenceData.length} sequence steps.`;
-            State.currentIndex = 0;
-            State.hasGhosted = false;
+            State.lastParamName = paramName;
+            return true;
 
         } catch (error) {
-            console.error(error);
-            UI.statusDisplay.textContent = "Error loading data.";
-        } finally {
-            UI.btnLoad.textContent = "Load Data";
-            UI.btnLoad.disabled = false;
+            console.error("Error extracting properties:", error);
+            UI.statusDisplay.textContent = "Error scanning model.";
+            return false;
         }
     }
 
@@ -261,19 +243,37 @@
     }
 
     async function playSimulation() {
-        if (State.sequenceData.length === 0) return;
-        
+        const paramName = UI.paramName.value.trim();
+        if (!paramName) return alert("Please enter a parameter name.");
+
+        UI.btnPlay.disabled = true;
+        UI.btnPause.disabled = true;
+        UI.btnReset.disabled = true;
+
+        // Fetch data if it hasn't been fetched yet, or if the user changed the parameter text
+        if (State.sequenceData.length === 0 || State.lastParamName !== paramName) {
+            const success = await fetchSequenceData(paramName);
+            if (!success) {
+                UI.btnPlay.disabled = false;
+                UI.btnReset.disabled = false;
+                return;
+            }
+        }
+
         // Ghost all objects before the tool starts (Grey, semi-transparent)
         if (!State.hasGhosted && State.currentIndex === 0) {
+            UI.statusDisplay.textContent = "Applying initial ghost state...";
             await applyColor(State.allObjects, "#d3d3d3", 50); 
             State.hasGhosted = true;
         }
 
         State.isPlaying = true;
-        UI.btnPlay.disabled = true;
         UI.btnPause.disabled = false;
+        UI.btnReset.disabled = false;
 
         const speedMs = parseFloat(UI.speedSlider.value) * 1000;
+        
+        // Execute first step and start interval
         executeStep();
         State.intervalId = setInterval(executeStep, speedMs);
     }
@@ -289,15 +289,19 @@
         pauseSimulation();
         State.currentIndex = 0;
         State.hasGhosted = false;
+        // Clear data so it re-fetches cleanly next time
+        State.sequenceData = []; 
+        State.lastParamName = "";
         
         if (viewerAPI) {
             const selector = { modelObjectIds: State.allObjects };
             await viewerAPI.setObjectState(selector, { color: "reset" });
         }
         
-        UI.statusDisplay.textContent = "Current Sequence: None";
+        UI.statusDisplay.textContent = "Ready to start";
         UI.btnPlay.disabled = false;
         UI.btnPause.disabled = true;
+        UI.btnReset.disabled = true;
     }
 
     async function executeStep() {
