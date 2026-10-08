@@ -42,14 +42,10 @@
             border-radius: 4px;
             cursor: pointer;
         }
-        .result-item:hover {
-            background-color: #e2e6ea;
-        }
-        .result-item:active {
-            transform: scale(0.98);
-        }
+        .result-item:hover { background-color: #e2e6ea; }
+        .result-item:active { transform: scale(0.98); }
         .result-item:last-child { border-bottom: none; margin-bottom: 0; }
-        .help-text { font-size: 11px; color: #555; margin-top: 10px; font-style: italic; display: none; }
+        .help-text { font-size: 12px; color: #005F9E; margin-top: 15px; font-weight: 600; display: none; }
     </style>
 </head>
 <body>
@@ -59,7 +55,8 @@
     <label for="paramName">IFC Parameter Name:</label>
     <input type="text" id="paramName" placeholder="e.g. Volume, Reference, etc.">
     <button id="getValueBtn" class="btn-main">Get & Sort Parameter</button>
-    <div class="help-text" id="help-text">Click on any item below to highlight it in the 3D model.</div>
+    
+    <div class="help-text" id="help-text">↓ Click an ID to isolate it in the viewer</div>
     <div id="result-box">Select elements and search...</div>
 </div>
 
@@ -101,26 +98,38 @@
         return foundValue;
     }
 
-    // 3. Highlight a single element when clicked
+    // 3. Highlight a single element when clicked in the list
     window.highlightItem = async function(modelId, elementId, domId) {
-        // UI Update: Remove green background from all items, apply to the clicked one
+        // UI Update: Highlight the clicked list item
         document.querySelectorAll('.result-item').forEach(el => el.style.backgroundColor = 'transparent');
         document.getElementById(domId).style.backgroundColor = '#d4edda';
 
         if (!tcAPI) return;
         
         try {
-            // Step A: Reset any previously applied custom colors back to normal
-            await tcAPI.viewer.setObjectState(undefined, { color: "reset" });
-            
-            // Step B: Set the 3D viewer selection to ONLY this specific clicked element. 
-            // This naturally clears the massive 175+ yellow selection block.
+            // STEP A: Change viewer selection to ONLY the clicked element. 
+            // This drops the massive yellow highlight off the rest of the model.
             await tcAPI.viewer.setSelection([{
                 modelId: modelId,
                 objectRuntimeIds: [elementId]
             }]);
 
-            // Step C: Apply a solid Green color to the selected element
+            // STEP B: Group all elements from our search to hide them
+            const models = {};
+            globalSortedResults.forEach(item => {
+                if (!models[item.modelId]) models[item.modelId] = [];
+                models[item.modelId].push(item.id);
+            });
+            
+            const allElementsSelector = [];
+            for (const mId in models) {
+                allElementsSelector.push({ modelId: mId, objectRuntimeIds: models[mId] });
+            }
+            
+            // Turn all tracked elements invisible (Opacity 0.0)
+            await tcAPI.viewer.setObjectState(allElementsSelector, { color: { r: 200, g: 200, b: 200, a: 0.0 } });
+            
+            // STEP C: Bring the clicked element back to visibility (Solid Green, Opacity 1.0)
             await tcAPI.viewer.setObjectState([{
                 modelId: modelId,
                 objectRuntimeIds: [elementId]
@@ -144,9 +153,6 @@
         resultBox.innerText = "Fetching and sorting data...";
         helpText.style.display = "none";
         
-        // Reset colors in viewer before starting
-        try { await tcAPI.viewer.setObjectState(undefined, { color: "reset" }); } catch(e) {}
-
         try {
             const selection = await tcAPI.viewer.getSelection();
             if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
@@ -162,56 +168,3 @@
                 if (sel.objectRuntimeIds && sel.objectRuntimeIds.length > 0) {
                     const propertiesList = await tcAPI.viewer.getObjectProperties(modelId, sel.objectRuntimeIds);
                     if (propertiesList && propertiesList.length > 0) {
-                        propertiesList.forEach((objectData, index) => {
-                            const value = findParameterValue(objectData, paramName);
-                            resultsArray.push({ modelId: modelId, id: sel.objectRuntimeIds[index], value: value });
-                        });
-                    }
-                }
-            }
-
-            // Sort ascending based on parameter value
-            resultsArray.sort((a, b) => {
-                const valA = a.value, valB = b.value;
-                if (valA == null) return 1;
-                if (valB == null) return -1;
-                const numA = Number(valA), numB = Number(valB);
-                if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-                return String(valA).localeCompare(String(valB));
-            });
-
-            globalSortedResults = resultsArray.filter(item => item.value !== null && item.value !== undefined);
-
-            // Generate HTML for the list, making each item clickable
-            resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
-            
-            resultsArray.forEach(item => {
-                const domId = `item-${item.id}`;
-                if (item.value !== null && item.value !== undefined) {
-                    // Injecting onclick method to trigger the highlight function
-                    resultBox.innerHTML += `
-                        <div class="result-item" id="${domId}" onclick="highlightItem('${item.modelId}', ${item.id}, '${domId}')">
-                            <strong>ID ${item.id}:</strong> ${item.value}
-                        </div>`;
-                } else {
-                    resultBox.innerHTML += `<div class="result-item" style="color:red; cursor:default;"><strong>ID ${item.id}:</strong> Not found</div>`;
-                }
-            });
-
-            if (globalSortedResults.length > 0) {
-                helpText.style.display = "block"; // Show instructions
-            } else {
-                resultBox.innerHTML += `<br><em>No valid data to list.</em>`;
-            }
-
-        } catch (error) {
-            console.error("API Error:", error);
-            resultBox.innerText = "Error fetching properties.";
-        }
-    });
-
-    window.onload = initExtension;
-</script>
-
-</body>
-</html>
