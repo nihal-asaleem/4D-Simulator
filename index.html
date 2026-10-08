@@ -72,7 +72,6 @@
             margin-bottom: 0;
         }
 
-        /* Simulation Controls Styles */
         #sim-controls {
             display: none; 
             margin-top: 15px;
@@ -336,8 +335,17 @@
                 }
             });
 
-            // CLEAR SELECTION: Vital for custom colors to be visible over the selection highlight!
-            try { await tcAPI.viewer.setSelection([]); } catch(e) {}
+            // ROBUST CLEAR SELECTION: Force the active model(s) to clear their selection list
+            // This drops the default yellow boundary highlight so the custom colors are visible.
+            try { 
+                const clearSelectionRequest = selection.map(sel => ({
+                    modelId: sel.modelId,
+                    objectRuntimeIds: [] 
+                }));
+                await tcAPI.viewer.setSelection(clearSelectionRequest); 
+            } catch(e) {
+                console.error("Selection clearing failed:", e);
+            }
 
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
