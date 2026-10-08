@@ -85,7 +85,6 @@
     <div id="result-box">Select elements and search...</div>
 </div>
 
-<!-- Using esm.sh to load the Workspace API natively in the browser -->
 <script type="module">
     import * as WorkspaceAPI from 'https://esm.sh/trimble-connect-workspace-api';
 
@@ -94,9 +93,7 @@
     // 1. Connect to the parent Trimble Connect window
     async function initExtension() {
         try {
-            tcAPI = await WorkspaceAPI.connect(window.parent, (event, args) => {
-                // Event listener for parent window interactions (optional)
-            });
+            tcAPI = await WorkspaceAPI.connect(window.parent, (event, args) => {});
             document.getElementById('status-text').innerText = "✅ API Connected";
             document.getElementById('status-text').style.color = "green";
         } catch (error) {
@@ -115,13 +112,11 @@
             if (foundValue !== null) return;
             if (typeof obj !== 'object' || obj === null) return;
 
-            // Handle array-based {name: "Volume", value: 10} formats
             if (obj.name && String(obj.name).toLowerCase() === targetName && obj.value !== undefined) {
                 foundValue = obj.value;
                 return;
             }
 
-            // Handle direct Key-Value pair formats
             for (const key in obj) {
                 if (key.toLowerCase() === targetName) {
                     foundValue = obj[key];
@@ -152,27 +147,23 @@
             return;
         }
 
-        resultBox.innerText = "Fetching data...";
+        resultBox.innerText = "Fetching and sorting data...";
 
         try {
-            // Get selected objects from the 3D Viewer
             const selection = await tcAPI.viewer.getSelection();
             
-            // Check if nothing is selected
             if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
                 resultBox.innerText = "No objects selected. Please click elements in the 3D viewer.";
                 return;
             }
 
-            resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
+            let resultsArray = []; // Collect results here first
 
             // Loop through all selected models
             for (const sel of selection) {
                 const modelId = sel.modelId;
                 
-                // Only process if there are objects selected in this particular model
                 if (sel.objectRuntimeIds && sel.objectRuntimeIds.length > 0) {
-                    // Fetch properties for all selected objects in this model at once
                     const propertiesList = await tcAPI.viewer.getObjectProperties(modelId, sel.objectRuntimeIds);
                     
                     if (propertiesList && propertiesList.length > 0) {
@@ -180,15 +171,44 @@
                             const value = findParameterValue(objectData, paramName);
                             const elementId = sel.objectRuntimeIds[index];
 
-                            if (value !== null && value !== undefined) {
-                                resultBox.innerHTML += `<div class="result-item"><strong>ID ${elementId}:</strong> ${value}</div>`;
-                            } else {
-                                resultBox.innerHTML += `<div class="result-item"><strong>ID ${elementId}:</strong> <span style="color:red">Not found</span></div>`;
-                            }
+                            // Store in array for sorting
+                            resultsArray.push({ id: elementId, value: value });
                         });
                     }
                 }
             }
+
+            // 4. Sort the collected array in ascending order
+            resultsArray.sort((a, b) => {
+                const valA = a.value;
+                const valB = b.value;
+
+                // Push "Not found" (null/undefined) values to the very bottom
+                if (valA === null || valA === undefined) return 1;
+                if (valB === null || valB === undefined) return -1;
+
+                // Try to treat as numbers for proper numeric sorting (e.g. 2 before 10)
+                const numA = Number(valA);
+                const numB = Number(valB);
+
+                if (!isNaN(numA) && !isNaN(numB)) {
+                    return numA - numB;
+                }
+
+                // If they aren't numbers, sort them alphabetically as text
+                return String(valA).localeCompare(String(valB));
+            });
+
+            // 5. Render the sorted HTML
+            resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
+            
+            resultsArray.forEach(item => {
+                if (item.value !== null && item.value !== undefined) {
+                    resultBox.innerHTML += `<div class="result-item"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
+                } else {
+                    resultBox.innerHTML += `<div class="result-item"><strong>ID ${item.id}:</strong> <span style="color:red">Not found</span></div>`;
+                }
+            });
 
         } catch (error) {
             console.error("API Error:", error);
@@ -196,7 +216,6 @@
         }
     });
 
-    // Initialize as soon as the DOM loads
     window.onload = initExtension;
 </script>
 
