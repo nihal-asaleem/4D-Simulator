@@ -102,22 +102,37 @@
     }
 
     // 3. Highlight UI List Item
-    function highlightUIItem(id) {
+    function highlightUIItem(index) {
         document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
-        const activeEl = document.getElementById(`item-${id}`);
+        const activeEl = document.getElementById(`item-${index}`);
         if (activeEl) {
             activeEl.classList.add('active');
             activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
 
-    // 4. Select Single Element in 3D Viewer
+    // 4. Robust Viewer Selection Clearing
+    async function clearViewerSelection() {
+        if (!tcAPI) return;
+        try {
+            // Target specific models and force their selection array to empty
+            const uniqueModels = [...new Set(globalSortedResults.map(item => item.modelId))];
+            const clearReq = uniqueModels.map(mId => ({ modelId: mId, objectRuntimeIds: [] }));
+            
+            await tcAPI.viewer.setSelection(clearReq);
+            await tcAPI.viewer.setSelection([]);
+        } catch (e) {
+            console.error("Clear selection failed:", e);
+        }
+    }
+
+    // 5. Select Single Element in 3D Viewer (using exact untouched API types)
     async function selectElementInViewer(modelId, objectId) {
         if (!tcAPI) return;
         try {
             await tcAPI.viewer.setSelection([{
                 modelId: modelId,
-                objectRuntimeIds: [objectId]
+                objectRuntimeIds: [objectId] 
             }]);
         } catch (e) {
             console.error("Selection failed:", e);
@@ -128,25 +143,27 @@
     function bindListClicks() {
         document.querySelectorAll('.result-item').forEach(el => {
             el.addEventListener('click', async (e) => {
-                pauseSimulation(); // Stop simulation if user manually clicks
-                const objId = parseInt(e.currentTarget.getAttribute('data-id'));
-                const modId = e.currentTarget.getAttribute('data-model');
+                pauseSimulation(); 
                 
-                if (!isNaN(objId) && modId) {
-                    highlightUIItem(objId);
-                    await selectElementInViewer(modId, objId);
+                // Fetch the exact object reference from our global array instead of parsing HTML attributes
+                const index = e.currentTarget.getAttribute('data-index');
+                const currItem = globalSortedResults[index];
+                
+                if (currItem) {
+                    highlightUIItem(index);
+                    await selectElementInViewer(currItem.modelId, currItem.id);
                 }
             });
         });
     }
 
-    // --- SIMULATION LOGIC (Using Native Selection) ---
+    // --- SIMULATION LOGIC ---
     async function resetSimulation() {
         pauseSimulation();
         currentIndex = 0;
         document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
         document.getElementById('result-box').scrollTop = 0;
-        try { await tcAPI.viewer.setSelection([]); } catch(e) {} // Clear 3D selection completely
+        await clearViewerSelection();
     }
 
     function playSimulation() {
@@ -164,12 +181,12 @@
         if (currentIndex < globalSortedResults.length) {
             const currItem = globalSortedResults[currentIndex];
             
-            highlightUIItem(currItem.id);
+            highlightUIItem(currentIndex);
             await selectElementInViewer(currItem.modelId, currItem.id);
             
             currentIndex++;
         } else {
-            pauseSimulation(); // Stop at end
+            pauseSimulation();
         }
     }
 
@@ -213,7 +230,6 @@
                 }
             }
 
-            // Sort ascending based on value
             resultsArray.sort((a, b) => {
                 const valA = a.value, valB = b.value;
                 if (valA == null) return 1;
@@ -223,24 +239,23 @@
                 return String(valA).localeCompare(String(valB));
             });
 
+            // Populate the global array
             globalSortedResults = resultsArray.filter(item => item.value !== null && item.value !== undefined);
 
             resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
-            resultsArray.forEach(item => {
-                if (item.value !== null && item.value !== undefined) {
-                    resultBox.innerHTML += `<div class="result-item" data-id="${item.id}" data-model="${item.modelId}" id="item-${item.id}" title="Click to isolate in Viewer"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
-                } else {
-                    resultBox.innerHTML += `<div class="result-item" style="color:red; cursor:default;"><strong>ID ${item.id}:</strong> Not found</div>`;
-                }
+            
+            // Map the HTML to the array Index, NOT the raw ID
+            globalSortedResults.forEach((item, idx) => {
+                resultBox.innerHTML += `<div class="result-item" data-index="${idx}" id="item-${idx}" title="Click to isolate in Viewer"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
             });
 
-            bindListClicks(); // Make the list clickable
+            bindListClicks(); 
 
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
                 
-                // Immediately drop the massive 175-element selection so the viewer is clean
-                try { await tcAPI.viewer.setSelection([]); } catch(e) {}
+                // Drop the 175-element selection block immediately so the model is ready
+                await clearViewerSelection();
                 
             } else {
                 document.getElementById('sim-controls').style.display = "none";
