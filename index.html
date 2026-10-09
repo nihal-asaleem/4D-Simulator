@@ -22,12 +22,13 @@
         input[type="text"] { width: 100%; padding: 8px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         .btn-main { width: 100%; padding: 10px; background-color: #005F9E; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
         .btn-main:hover { background-color: #004573; }
-        #result-box { margin-top: 15px; padding: 10px; background-color: #f1f1f1; border-left: 4px solid #005F9E; word-break: break-all; min-height: 40px; max-height: 200px; overflow-y: auto; scroll-behavior: smooth; }
+        #result-box { margin-top: 15px; padding: 10px; background-color: #f1f1f1; border-left: 4px solid #005F9E; word-break: break-all; min-height: 40px; max-height: 250px; overflow-y: auto; scroll-behavior: smooth; }
         .status { font-size: 12px; color: #666; margin-bottom: 10px; }
         
-        /* Added cursor pointer and hover effect for clickable list items */
+        /* Clickable List Items */
         .result-item { margin-bottom: 8px; padding: 8px; border-bottom: 1px solid #ddd; transition: background-color 0.2s; border-radius: 4px; cursor: pointer; }
         .result-item:hover { background-color: #e2e6ea; }
+        .result-item.active { background-color: #d4edda; border-left: 4px solid #28a745; }
         .result-item:last-child { border-bottom: none; margin-bottom: 0; }
         
         #sim-controls { display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #ccc; }
@@ -55,7 +56,7 @@
         <div class="sim-btn-group">
             <button id="btn-play" class="sim-btn">Play</button>
             <button id="btn-pause" class="sim-btn">Pause</button>
-            <button id="btn-reset" class="sim-btn">Reset</button>
+            <button id="btn-reset" class="sim-btn">Clear Selection</button>
         </div>
     </div>
 </div>
@@ -100,58 +101,56 @@
         return foundValue;
     }
 
-    // 3. Centralized State Manager (Hidden, Yellow, or Green)
-    async function applyState(items, stateType) {
-        if (!items || items.length === 0 || !tcAPI) return;
-        
-        const models = {};
-        items.forEach(item => {
-            if (!models[item.modelId]) models[item.modelId] = [];
-            models[item.modelId].push(item.id);
-        });
-        
-        const selectorArray = [];
-        for (const mId in models) {
-            selectorArray.push({ modelId: mId, objectRuntimeIds: models[mId] });
-        }
-        
-        try {
-            if (stateType === "hidden") {
-                await tcAPI.viewer.setObjectState(selectorArray, { visible: false });
-            } else if (stateType === "active") {
-                // Active Step: Visible + Yellow
-                await tcAPI.viewer.setObjectState(selectorArray, { visible: true, color: { r: 255, g: 255, b: 0, a: 1.0 } });
-            } else if (stateType === "done") {
-                // Finished Step: Visible + Green
-                await tcAPI.viewer.setObjectState(selectorArray, { visible: true, color: { r: 40, g: 167, b: 69, a: 1.0 } });
-            }
-        } catch (e) { 
-            console.error("Failed to set visibility state", e); 
+    // 3. Highlight UI List Item
+    function highlightUIItem(id) {
+        document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
+        const activeEl = document.getElementById(`item-${id}`);
+        if (activeEl) {
+            activeEl.classList.add('active');
+            activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
 
-    // --- SIMULATION LOGIC ---
+    // 4. Select Single Element in 3D Viewer
+    async function selectElementInViewer(modelId, objectId) {
+        if (!tcAPI) return;
+        try {
+            await tcAPI.viewer.setSelection([{
+                modelId: modelId,
+                objectRuntimeIds: [objectId]
+            }]);
+        } catch (e) {
+            console.error("Selection failed:", e);
+        }
+    }
 
+    // --- BIND CLICKS TO RESULT LIST ---
+    function bindListClicks() {
+        document.querySelectorAll('.result-item').forEach(el => {
+            el.addEventListener('click', async (e) => {
+                pauseSimulation(); // Stop simulation if user manually clicks
+                const objId = parseInt(e.currentTarget.getAttribute('data-id'));
+                const modId = e.currentTarget.getAttribute('data-model');
+                
+                if (!isNaN(objId) && modId) {
+                    highlightUIItem(objId);
+                    await selectElementInViewer(modId, objId);
+                }
+            });
+        });
+    }
+
+    // --- SIMULATION LOGIC (Using Native Selection) ---
     async function resetSimulation() {
         pauseSimulation();
         currentIndex = 0;
-        
-        // Hide ALL valid elements 
-        await applyState(globalSortedResults, "hidden");
-
-        // Clear UI highlights
-        document.querySelectorAll('.result-item').forEach(el => {
-            el.style.backgroundColor = 'transparent';
-        });
+        document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
         document.getElementById('result-box').scrollTop = 0;
+        try { await tcAPI.viewer.setSelection([]); } catch(e) {} // Clear 3D selection completely
     }
 
     function playSimulation() {
         if (simInterval || globalSortedResults.length === 0) return;
-        
-        // Clear selection just in case user clicked something before hitting play
-        tcAPI.viewer.setSelection([]);
-
         const speedMs = parseFloat(document.getElementById('sim-speed').value) * 1000;
         simInterval = setInterval(() => { stepSimulation(); }, speedMs);
         stepSimulation(); 
@@ -162,49 +161,19 @@
     }
 
     async function stepSimulation() {
-        // 1. Turn previous element Green (Finished)
-        if (currentIndex > 0) {
-            const prevItem = globalSortedResults[currentIndex - 1];
-            await applyState([prevItem], "done"); 
-            
-            const prevEl = document.getElementById(`item-${prevItem.id}`);
-            if (prevEl) prevEl.style.backgroundColor = '#d4edda'; 
-        }
-        
-        // 2. Turn current element Yellow (Active) and scroll list
         if (currentIndex < globalSortedResults.length) {
             const currItem = globalSortedResults[currentIndex];
-            await applyState([currItem], "active"); 
             
-            const currEl = document.getElementById(`item-${currItem.id}`);
-            if (currEl) {
-                currEl.style.backgroundColor = '#fff3cd'; 
-                currEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
+            highlightUIItem(currItem.id);
+            await selectElementInViewer(currItem.modelId, currItem.id);
+            
             currentIndex++;
         } else {
-            pauseSimulation(); // Stop at the end
+            pauseSimulation(); // Stop at end
         }
-    }
-
-    // --- BIND CLICKS TO RESULT LIST ---
-    function bindListClicks() {
-        document.querySelectorAll('.result-item').forEach(el => {
-            el.addEventListener('click', async (e) => {
-                const objId = parseInt(e.currentTarget.getAttribute('data-id'));
-                const modId = e.currentTarget.getAttribute('data-model');
-                
-                if (!isNaN(objId) && modId) {
-                    pauseSimulation();
-                    // Explicitly command API to select ONLY this one specific element
-                    await tcAPI.viewer.setSelection([{ modelId: modId, objectRuntimeIds: [objId] }]);
-                }
-            });
-        });
     }
 
     // --- EVENT LISTENERS ---
-    
     document.getElementById('sim-speed').addEventListener('input', function() { document.getElementById('speed-val').innerText = parseFloat(this.value).toFixed(1); });
     document.getElementById('sim-speed').addEventListener('change', function() { if (simInterval) { pauseSimulation(); playSimulation(); } });
     document.getElementById('btn-play').addEventListener('click', playSimulation);
@@ -224,7 +193,7 @@
         try {
             const selection = await tcAPI.viewer.getSelection();
             if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
-                resultBox.innerText = "No objects selected.";
+                resultBox.innerText = "No objects selected. Please select items first.";
                 document.getElementById('sim-controls').style.display = "none";
                 return;
             }
@@ -244,6 +213,7 @@
                 }
             }
 
+            // Sort ascending based on value
             resultsArray.sort((a, b) => {
                 const valA = a.value, valB = b.value;
                 if (valA == null) return 1;
@@ -264,21 +234,17 @@
                 }
             });
 
-            // Bind individual selection clicks to the newly created list elements
-            bindListClicks();
+            bindListClicks(); // Make the list clickable
 
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
                 
-                // CRUCIAL FIX: Clear selection, wait 300ms for the viewer to render the dropped yellow boxes, THEN hide elements.
-                await tcAPI.viewer.setSelection([]);
-                setTimeout(async () => {
-                    await resetSimulation();
-                }, 300);
-
+                // Immediately drop the massive 175-element selection so the viewer is clean
+                try { await tcAPI.viewer.setSelection([]); } catch(e) {}
+                
             } else {
                 document.getElementById('sim-controls').style.display = "none";
-                resultBox.innerHTML += `<br><em>No valid data to simulate.</em>`;
+                resultBox.innerHTML += `<br><em>No valid data found.</em>`;
             }
 
         } catch (error) {
