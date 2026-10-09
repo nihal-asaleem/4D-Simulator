@@ -115,18 +115,14 @@
     async function clearViewerSelection() {
         if (!tcAPI) return;
         try {
-            // Target specific models and force their selection array to empty
-            const uniqueModels = [...new Set(globalSortedResults.map(item => item.modelId))];
-            const clearReq = uniqueModels.map(mId => ({ modelId: mId, objectRuntimeIds: [] }));
-            
-            await tcAPI.viewer.setSelection(clearReq);
+            // Passing a simple empty array is the safest way to drop active selection
             await tcAPI.viewer.setSelection([]);
         } catch (e) {
             console.error("Clear selection failed:", e);
         }
     }
 
-    // 5. Select Single Element in 3D Viewer (using exact untouched API types)
+    // 5. Select Single Element in 3D Viewer 
     async function selectElementInViewer(modelId, objectId) {
         if (!tcAPI) return;
         try {
@@ -145,13 +141,18 @@
             el.addEventListener('click', async (e) => {
                 pauseSimulation(); 
                 
-                // Fetch the exact object reference from our global array instead of parsing HTML attributes
                 const index = e.currentTarget.getAttribute('data-index');
                 const currItem = globalSortedResults[index];
                 
                 if (currItem) {
                     highlightUIItem(index);
-                    await selectElementInViewer(currItem.modelId, currItem.id);
+                    
+                    // Force the viewer to clear the existing selection before selecting the new one
+                    await clearViewerSelection();
+                    
+                    setTimeout(async () => {
+                        await selectElementInViewer(currItem.modelId, currItem.id);
+                    }, 50); // Minor delay ensures the viewer digests the clear command
                 }
             });
         });
@@ -182,7 +183,11 @@
             const currItem = globalSortedResults[currentIndex];
             
             highlightUIItem(currentIndex);
-            await selectElementInViewer(currItem.modelId, currItem.id);
+            
+            await clearViewerSelection();
+            setTimeout(async () => {
+                await selectElementInViewer(currItem.modelId, currItem.id);
+            }, 25);
             
             currentIndex++;
         } else {
@@ -239,12 +244,10 @@
                 return String(valA).localeCompare(String(valB));
             });
 
-            // Populate the global array
             globalSortedResults = resultsArray.filter(item => item.value !== null && item.value !== undefined);
 
             resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
             
-            // Map the HTML to the array Index, NOT the raw ID
             globalSortedResults.forEach((item, idx) => {
                 resultBox.innerHTML += `<div class="result-item" data-index="${idx}" id="item-${idx}" title="Click to isolate in Viewer"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
             });
@@ -254,7 +257,7 @@
             if (globalSortedResults.length > 0) {
                 document.getElementById('sim-controls').style.display = "block";
                 
-                // Drop the 175-element selection block immediately so the model is ready
+                // Ensure the massive selection block is cleared once data is processed
                 await clearViewerSelection();
                 
             } else {
