@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trimble Connect Parameter Simulator</title>
+    <title>Construction Sequence Simulation</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -20,69 +20,73 @@
         }
         label { font-size: 14px; font-weight: 600; display: block; margin-bottom: 5px; }
         input[type="text"] { width: 100%; padding: 8px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        .btn-main { width: 100%; padding: 10px; background-color: #005F9E; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        
+        .btn-main { width: 100%; padding: 10px; background-color: #005F9E; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; margin-bottom: 10px;}
         .btn-main:hover { background-color: #004573; }
-        #result-box { margin-top: 15px; padding: 10px; background-color: #f1f1f1; border-left: 4px solid #005F9E; word-break: break-all; min-height: 40px; max-height: 250px; overflow-y: auto; scroll-behavior: smooth; }
-        .status { font-size: 12px; color: #666; margin-bottom: 10px; }
+        .btn-main:disabled { background-color: #cccccc; cursor: not-allowed; }
         
-        /* Clickable List Items */
-        .result-item { margin-bottom: 8px; padding: 8px; border-bottom: 1px solid #ddd; transition: background-color 0.2s; border-radius: 4px; cursor: pointer; }
-        .result-item:hover { background-color: #e2e6ea; }
-        .result-item.active { background-color: #d4edda; border-left: 4px solid #28a745; }
-        .result-item:last-child { border-bottom: none; margin-bottom: 0; }
+        .btn-group { display: flex; gap: 10px; margin-bottom: 15px; }
+        .btn-sim { flex: 1; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; color: white; }
+        #btn-simulate { background-color: #28a745; }
+        #btn-simulate:hover { background-color: #218838; }
+        #btn-reset { background-color: #dc3545; }
+        #btn-reset:hover { background-color: #c82333; }
         
-        #sim-controls { display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #ccc; }
-        .sim-btn-group { display: flex; gap: 5px; margin-top: 10px; }
-        .sim-btn { flex: 1; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; }
-        #btn-play { background-color: #28a745; } #btn-play:hover { background-color: #218838; }
-        #btn-pause { background-color: #ffc107; color: #333; } #btn-pause:hover { background-color: #e0a800; }
-        #btn-reset { background-color: #dc3545; } #btn-reset:hover { background-color: #c82333; }
-        input[type="range"] { width: 100%; margin-top: 5px; }
+        .delay-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+        .delay-container input { width: 80px; padding: 5px; border: 1px solid #ccc; border-radius: 4px; }
+        
+        #status-label { font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #005F9E; min-height: 18px; }
+        
+        #result-box { padding: 10px; background-color: #f1f1f1; border-left: 4px solid #005F9E; min-height: 40px; max-height: 250px; overflow-y: auto; scroll-behavior: smooth; }
+        .group-item { margin-bottom: 8px; padding: 8px; border-bottom: 1px solid #ddd; background-color: white; border-radius: 4px; }
+        .group-item.active { background-color: #d4edda; border-left: 4px solid #28a745; }
+        .group-item:last-child { border-bottom: none; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="status" id="status-text">Connecting to Trimble Connect...</div>
-    <label for="paramName">IFC Parameter Name:</label>
-    <input type="text" id="paramName" placeholder="e.g. Volume, Reference, etc.">
-    <button id="getValueBtn" class="btn-main">Get & Sort Parameter</button>
-    <div id="result-box">Select elements and search...</div>
-
-    <!-- Simulation Controls -->
-    <div id="sim-controls">
-        <label>Playback Speed: <span id="speed-val">0.5</span>s / step</label>
-        <input type="range" id="sim-speed" min="0.1" max="3" step="0.1" value="0.5">
-        <div class="sim-btn-group">
-            <button id="btn-play" class="sim-btn">Play</button>
-            <button id="btn-pause" class="sim-btn">Pause</button>
-            <button id="btn-reset" class="sim-btn">Clear Selection</button>
-        </div>
+    <div id="status-label">Ready.</div>
+    
+    <label for="paramName">Sequence Parameter (e.g. ORDER):</label>
+    <input type="text" id="paramName" value="ORDER">
+    
+    <button id="getValueBtn" class="btn-main">Fetch & Group Data</button>
+    
+    <div class="delay-container">
+        <label for="delayInput" style="margin-bottom: 0;">Step Delay (ms):</label>
+        <input type="number" id="delayInput" min="50" max="5000" step="50" value="500">
     </div>
+    
+    <div class="btn-group">
+        <button id="btn-simulate" class="btn-sim" disabled>Simulate</button>
+        <button id="btn-reset" class="btn-sim" disabled>Reset View</button>
+    </div>
+    
+    <div id="result-box">Select elements in model and click Fetch.</div>
 </div>
 
 <script type="module">
     import * as WorkspaceAPI from 'https://esm.sh/trimble-connect-workspace-api';
 
     let tcAPI = null;
-    let globalSortedResults = []; 
+    let globalGroupedResults = []; 
     let simInterval = null;
-    let currentIndex = 0;
+    let currentStep = 0;
 
     // 1. Connect to API
     async function initExtension() {
         try {
             tcAPI = await WorkspaceAPI.connect(window.parent, (event, args) => {});
-            document.getElementById('status-text').innerText = "✅ API Connected";
-            document.getElementById('status-text').style.color = "green";
+            document.getElementById('status-label').innerText = "✅ API Connected. Select elements.";
         } catch (error) {
             console.error("Connection Failed", error);
-            document.getElementById('status-text').innerText = "❌ Connection Failed";
-            document.getElementById('status-text').style.color = "red";
+            document.getElementById('status-label').innerText = "❌ Connection Failed";
+            document.getElementById('status-label').style.color = "red";
         }
     }
 
-    // 2. Recursive Search
+    // 2. Recursive Parameter Search
     function findParameterValue(propertiesData, paramName) {
         let foundValue = null;
         const targetName = paramName.toLowerCase();
@@ -101,122 +105,121 @@
         return foundValue;
     }
 
-    // 3. Highlight UI List Item
-    function highlightUIItem(index) {
-        document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
-        const activeEl = document.getElementById(`item-${index}`);
-        if (activeEl) {
-            activeEl.classList.add('active');
-            activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-    }
-
-    // 4. Robust Viewer Selection Clearing
-    async function clearViewerSelection() {
-        if (!tcAPI) return;
-        try {
-            // Passing a simple empty array is the safest way to drop active selection
-            await tcAPI.viewer.setSelection([]);
-        } catch (e) {
-            console.error("Clear selection failed:", e);
-        }
-    }
-
-    // 5. Select Single Element in 3D Viewer 
-    async function selectElementInViewer(modelId, objectId) {
-        if (!tcAPI) return;
-        try {
-            await tcAPI.viewer.setSelection([{
-                modelId: modelId,
-                objectRuntimeIds: [objectId] 
-            }]);
-        } catch (e) {
-            console.error("Selection failed:", e);
-        }
-    }
-
-    // --- BIND CLICKS TO RESULT LIST ---
-    function bindListClicks() {
-        document.querySelectorAll('.result-item').forEach(el => {
-            el.addEventListener('click', async (e) => {
-                pauseSimulation(); 
-                
-                const index = e.currentTarget.getAttribute('data-index');
-                const currItem = globalSortedResults[index];
-                
-                if (currItem) {
-                    highlightUIItem(index);
-                    
-                    // Force the viewer to clear the existing selection before selecting the new one
-                    await clearViewerSelection();
-                    
-                    setTimeout(async () => {
-                        await selectElementInViewer(currItem.modelId, currItem.id);
-                    }, 50); // Minor delay ensures the viewer digests the clear command
-                }
-            });
+    // 3. Apply Visibility 
+    // Uses alpha channel because native "visible: false" is often overridden by Viewer bugs
+    async function applyVisibility(items, isVisible) {
+        if (!items || items.length === 0 || !tcAPI) return;
+        
+        const models = {};
+        items.forEach(item => {
+            if (!models[item.modelId]) models[item.modelId] = [];
+            models[item.modelId].push(item.id);
         });
+        
+        const selectorArray = [];
+        for (const mId in models) {
+            selectorArray.push({ modelId: mId, objectRuntimeIds: models[mId] });
+        }
+        
+        try {
+            if (!isVisible) {
+                // Hide: Transparent
+                await tcAPI.viewer.setObjectState(selectorArray, { color: { r: 200, g: 200, b: 200, a: 0.0 } });
+            } else {
+                // Show: Reset to original material color
+                await tcAPI.viewer.setObjectState(selectorArray, { color: "reset" });
+            }
+        } catch (e) {
+            console.error("Visibility change failed", e);
+        }
     }
 
     // --- SIMULATION LOGIC ---
-    async function resetSimulation() {
-        pauseSimulation();
-        currentIndex = 0;
-        document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
-        document.getElementById('result-box').scrollTop = 0;
-        await clearViewerSelection();
-    }
 
-    function playSimulation() {
-        if (simInterval || globalSortedResults.length === 0) return;
-        const speedMs = parseFloat(document.getElementById('sim-speed').value) * 1000;
-        simInterval = setInterval(() => { stepSimulation(); }, speedMs);
-        stepSimulation(); 
-    }
-
-    function pauseSimulation() {
-        if (simInterval) { clearInterval(simInterval); simInterval = null; }
+    async function startSimulation() {
+        if (globalGroupedResults.length === 0) return;
+        
+        document.getElementById('btn-simulate').disabled = true;
+        document.getElementById('getValueBtn').disabled = true;
+        
+        clearInterval(simInterval);
+        currentStep = 0;
+        
+        document.getElementById('status-label').innerText = "Hiding all objects...";
+        
+        // Clear selection robustly to drop yellow highlights
+        try { await tcAPI.viewer.setSelection([]); } catch(e) {}
+        
+        // Wait briefly for viewer to drop selection, then hide all valid items
+        setTimeout(async () => {
+            let allItems = [];
+            globalGroupedResults.forEach(g => allItems = allItems.concat(g.items));
+            await applyVisibility(allItems, false);
+            
+            // Start stepping through the groups
+            const delay = parseInt(document.getElementById('delayInput').value) || 500;
+            simInterval = setInterval(() => { stepSimulation(); }, delay);
+            stepSimulation(); // trigger first immediately
+            
+        }, 300);
     }
 
     async function stepSimulation() {
-        if (currentIndex < globalSortedResults.length) {
-            const currItem = globalSortedResults[currentIndex];
+        if (currentStep < globalGroupedResults.length) {
+            const group = globalGroupedResults[currentStep];
             
-            highlightUIItem(currentIndex);
+            document.getElementById('status-label').innerText = `Showing Step ${currentStep + 1}/${globalGroupedResults.length} (ORDER: ${group.key})...`;
             
-            await clearViewerSelection();
-            setTimeout(async () => {
-                await selectElementInViewer(currItem.modelId, currItem.id);
-            }, 25);
+            // Highlight UI
+            document.querySelectorAll('.group-item').forEach(el => el.classList.remove('active'));
+            const uiEl = document.getElementById(`group-${currentStep}`);
+            if (uiEl) {
+                uiEl.classList.add('active');
+                uiEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            // Show the items in this group
+            await applyVisibility(group.items, true);
             
-            currentIndex++;
+            currentStep++;
         } else {
-            pauseSimulation();
+            clearInterval(simInterval);
+            document.getElementById('status-label').innerText = "Simulation completed.";
+            document.getElementById('btn-simulate').disabled = false;
+            document.getElementById('getValueBtn').disabled = false;
         }
     }
 
-    // --- EVENT LISTENERS ---
-    document.getElementById('sim-speed').addEventListener('input', function() { document.getElementById('speed-val').innerText = parseFloat(this.value).toFixed(1); });
-    document.getElementById('sim-speed').addEventListener('change', function() { if (simInterval) { pauseSimulation(); playSimulation(); } });
-    document.getElementById('btn-play').addEventListener('click', playSimulation);
-    document.getElementById('btn-pause').addEventListener('click', pauseSimulation);
-    document.getElementById('btn-reset').addEventListener('click', resetSimulation);
+    async function resetView() {
+        clearInterval(simInterval);
+        document.getElementById('btn-simulate').disabled = false;
+        document.getElementById('getValueBtn').disabled = false;
+        
+        document.getElementById('status-label').innerText = "View reset to normal.";
+        document.querySelectorAll('.group-item').forEach(el => el.classList.remove('active'));
+        
+        // Restore visibility to all tracked items
+        let allItems = [];
+        globalGroupedResults.forEach(g => allItems = allItems.concat(g.items));
+        await applyVisibility(allItems, true);
+        
+        try { await tcAPI.viewer.setSelection([]); } catch(e) {}
+    }
 
+    // --- FETCH & GROUP DATA ---
     document.getElementById('getValueBtn').addEventListener('click', async () => {
         const resultBox = document.getElementById('result-box');
         if (!tcAPI) { resultBox.innerText = "Error: API not connected."; return; }
 
         const paramName = document.getElementById('paramName').value.trim();
-        if (!paramName) { resultBox.innerText = "Please type a parameter name."; return; }
+        if (!paramName) { resultBox.innerText = "Please provide a parameter name."; return; }
 
-        resultBox.innerText = "Fetching and sorting data...";
-        pauseSimulation();
+        document.getElementById('status-label').innerText = "Collecting assemblies...";
         
         try {
             const selection = await tcAPI.viewer.getSelection();
             if (!selection || selection.length === 0 || selection.every(sel => sel.objectRuntimeIds.length === 0)) {
-                resultBox.innerText = "No objects selected. Please select items first.";
-                document.getElementById('sim-controls').style.display = "none";
+                resultBox.innerText = "No objects selected. Please select items in the model first.";
                 return;
             }
 
@@ -229,41 +232,46 @@
                     if (propertiesList && propertiesList.length > 0) {
                         propertiesList.forEach((objectData, index) => {
                             const value = findParameterValue(objectData, paramName);
-                            resultsArray.push({ modelId: modelId, id: sel.objectRuntimeIds[index], value: value });
+                            if (value !== null && value !== undefined) {
+                                resultsArray.push({ modelId: modelId, id: sel.objectRuntimeIds[index], value: value });
+                            }
                         });
                     }
                 }
             }
 
-            resultsArray.sort((a, b) => {
-                const valA = a.value, valB = b.value;
-                if (valA == null) return 1;
-                if (valB == null) return -1;
-                const numA = Number(valA), numB = Number(valB);
-                if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-                return String(valA).localeCompare(String(valB));
-            });
-
-            globalSortedResults = resultsArray.filter(item => item.value !== null && item.value !== undefined);
-
-            resultBox.innerHTML = `<strong>Results for "${paramName}":</strong><br><br>`;
-            
-            globalSortedResults.forEach((item, idx) => {
-                resultBox.innerHTML += `<div class="result-item" data-index="${idx}" id="item-${idx}" title="Click to isolate in Viewer"><strong>ID ${item.id}:</strong> ${item.value}</div>`;
-            });
-
-            bindListClicks(); 
-
-            if (globalSortedResults.length > 0) {
-                document.getElementById('sim-controls').style.display = "block";
-                
-                // Ensure the massive selection block is cleared once data is processed
-                await clearViewerSelection();
-                
-            } else {
-                document.getElementById('sim-controls').style.display = "none";
-                resultBox.innerHTML += `<br><em>No valid data found.</em>`;
+            if (resultsArray.length === 0) {
+                resultBox.innerText = `Parameter "${paramName}" not found on selected objects.`;
+                document.getElementById('status-label').innerText = "No valid data found.";
+                return;
             }
+
+            // Group by Parameter Value
+            const groupsMap = {};
+            resultsArray.forEach(item => {
+                const key = String(item.value);
+                if (!groupsMap[key]) groupsMap[key] = [];
+                groupsMap[key].push(item);
+            });
+
+            // Sort Groups Ascending
+            const sortedKeys = Object.keys(groupsMap).sort((a, b) => {
+                const numA = Number(a), numB = Number(b);
+                if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                return a.localeCompare(b);
+            });
+
+            globalGroupedResults = sortedKeys.map(k => ({ key: k, items: groupsMap[k] }));
+
+            // Render UI
+            resultBox.innerHTML = `<strong>Sequence Groups (${globalGroupedResults.length} steps):</strong><br><br>`;
+            globalGroupedResults.forEach((group, idx) => {
+                resultBox.innerHTML += `<div class="group-item" id="group-${idx}"><strong>${paramName}: ${group.key}</strong> <span style="float:right; color:#666; font-size:12px;">(${group.items.length} parts)</span></div>`;
+            });
+
+            document.getElementById('btn-simulate').disabled = false;
+            document.getElementById('btn-reset').disabled = false;
+            document.getElementById('status-label').innerText = `Ready to simulate ${globalGroupedResults.length} steps.`;
 
         } catch (error) {
             console.error("API Error:", error);
@@ -271,6 +279,8 @@
         }
     });
 
+    document.getElementById('btn-simulate').addEventListener('click', startSimulation);
+    document.getElementById('btn-reset').addEventListener('click', resetView);
     window.onload = initExtension;
 </script>
 
